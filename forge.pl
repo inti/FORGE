@@ -17,7 +17,8 @@ use Pod::Usage;
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
       $all_genes, $analysis_chr, $report, $spearman, $affy_to_rsid,
       $v,  $lambda,$print_cor, $pearson_genotypes,$distance, $sample_score, $ped, $map);
-
+my $VERSION = "0.9";
+print_OUT("FORGE version [ $VERSION ]");
 GetOptions(
    'help|h' => \$help,
    'man' => \$man,

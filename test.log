@@ -1,0 +1,13 @@
+Wed Aug 11 17:35:26 2010	LOG file will be written to [ test.log ]
+Wed Aug 11 17:35:26 2010	Max SNP-to-gene distance allowed [ 20 ] kb
+Wed Aug 11 17:35:26 2010	Read Gene List command line [ SYN3  ]
+Wed Aug 11 17:35:26 2010	Reading association file: [ example/example.assoc ]
+Wed Aug 11 17:35:26 2010	[ 19 ] SNPs with association data
+Wed Aug 11 17:35:26 2010	Reading SNPs info from [ example/example.bim ]
+Wed Aug 11 17:35:26 2010	[ 20 ] SNPs on BED file
+Wed Aug 11 17:35:26 2010	Reading samples info from [ example/example.fam ]
+Wed Aug 11 17:35:26 2010	[ 4806 ] samples read
+Wed Aug 11 17:35:26 2010	Reading gene to SNP mapping file from [ example/example.snpmap ]
+Wed Aug 11 17:35:26 2010	  '->[ 0 ] Genes will be analyzed
+Wed Aug 11 17:35:26 2010	  '->[ 0 ] SNPs mapped to Genes and with association results will be analyzed
+Wed Aug 11 17:35:26 2010	No genes mapped

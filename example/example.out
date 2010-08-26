@@ -1,0 +1,1 @@
+Ensembl_ID	Hugo_id	gene_type	chromosome	start	end	min_p	min_p_sidak_corrected_by_number_of_tests	fisher_combined_gene-pvalue	chi-square	degrees_of_freedom	Galwey_pvalue	Galwey_chi_square	Galwey_degrees_freedom	number_of_snps	number_effective_tests(Gaoetal;PDMID:19434714)

@@ -1,0 +1,84 @@
+Any question contact Inti Pedroso <intipedroso@gmail.com> or Gerome Breen <gerome.breen@kcl.ac.uk>
+
+Summary
+This is a documentation for the gene_wide_pvalue_v0.5.pl script to calculate gene p-values based on the modified version of the Fisher method to combined p-values introduced by Makabi et al (2003).
+
+Program Usage and Options
+Options:
+   -bfile	PLINK binary format files 
+   -out|o	name of the output file
+   -assoc|a	genetic association results
+   -gene_list	file with ids of gene to be analyzed
+   -genes	in-line list of genes to be analyzed
+   -all_genes	analyzed all genes
+   -snpmap|m	SNP to gene mapping
+   -report	report advance every X number of SNPs when reading genotype file
+   -correlation|cor  	file with precalculated correlation between SNPs
+   -affy_to_rsid     	Affy chips to rsid mappinf file
+   -verbose|v        	let the script print as much as it likes. (I use it for debuging)
+   -chr		specify which chromosome to analyze
+   -lambda	specify a lambda value to correct the SNPs p-values. This is useful if you think there is inflation in the statistics.
+   -print_cor	use this to print the SNP-SNP correlation values to file *.correlation
+   -pearson_genotypes	This will set the SNP-SNP correlation to be calculated with the Welleck et al (2009) method. See ref for details. Default is the Spearman Rank Correlation.
+
+
+Input files
+The program needs as basic input association p-values (-assoc), SNP to gene mapping (-snpmap ), output file (-out), set of genes to be analyzed (-gene_list, -genes or -all_genes) and a genotype file.
+To speed up calculation you can provide a set of pre-calculated correlation between the SNPs. If you do not provide pre-calculated correlation between the SNPs the program will calculate on the fly (with the Spearman Rank Correlation or the method described by S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009)). If working with lots of SNPs and genes it may actually be faster to calculate the correlation on the fly rather than read a huge file.
+
+Output files
+The program will generate 2 output files. The prefix is specified with the -out option and generates files named : prefix and prefix.correlation. 
+The columns of this files are 
+Ensembl ID: id from Ensembl data base (www.ensembl.org/).  
+Hugo id: Hugo id as fetched ensembl data base.
+gene type: gene type based on annotation from the SNP-to-gene file
+Chromosome: self explanatory
+Start: annotated start + 20kb.
+End: annotated start + 20kb.
+Min_p: minimum uncorrected p-value mapped to the gene
+Min_p_sidak_corrected_by_number_of_tests: minimum uncorrected p-value corrected by number of effective tests (see column 12) using Sidak correction. Sidak corrected p-values is = (1-p)^k, where p is the uncorrected p-value and k the number of tests.
+fisher_combined_gene-pvalue: this is the p-value obtained from the modified Fisher method to combined p-values.
+chi-square: chi-square of the test use to calculate column 8
+Degrees_of_freedom: degrees of freedom of the test use to calculate column 8
+Galwey_pvalue: this p-value is calculated as decribed by N. W. Galwey, Genet. Epidemiol. (2009).
+Galwey_chi_square: chi-square of the test above	
+Galwey_degrees_freedom: see Galwey_pvalue.
+Number_of_snps: number of snps mapped to the gene
+Number_effective_tests(Gaoetal;PDMID:19434714): number of effective test calculated as per Gao et al. (2008).
+
+
+The second output file is call *.correlation (where * is the prefix you specified with option -out) and has the correlation between the SNPs used in the analysis. This will present a subset of the inputed correlation values plus any value that has been calculated during the running.
+
+Detailed description of options
+bfile: If you do not provide the values of the correlation between the SNPs (or if it is incomplete) the program will calculate it on the fly using the genotypes from this files. You only mead to provide the files name without the extenstion, for example if you have the files example.bed example.bim example.fam you only need to use -bfile example These must be a set of PLINK file in binary format as described in (http://pngu.mgh.harvard.edu/~purcell/plink/).
+
+out|o: name of the output file
+
+assoc|a: This file provide the genetic association results. It must be a space separated file a header line containing SNP and P. It does not matter if you have more columns, the  important thing is to have the header.
+
+Gene_list: This should be a file with a list of IDs. You can use any IDs provided in the SNP-to-gene mapping dfile. 
+
+Genes: if you have just a few genes you can use this option (if you prefer). Just give the gene names like -genes P53,INS, etc...
+
+all_genes: set to analyse all genes in the SNP-to-gene mapping file
+
+snpmap|m: the SNP-to-gene mapping files defines which SNPs are within each gene. It has a format I commonly used. It is a tab separated file with columns: chromosome, start, end, gene_info, SNPs. The cols gene_info and SNPs require a little more explanation. In gene_info I put Ensembl_id:Hugo_id:gene_type. Gene_type means if the gene is a protein coding genes, miRNA, ncRNA, etc., I extract that information from the Ensembl DB.The SNP cols has the SNPs ids separated by spaces, so columns are separared by tabs but SNP ids by spaces. Here is an example: 	chr1 534305 574676 ENSG00000219764:RP5-857K21.9:unprocessed_pseudogene 	 rs10458597 SNP_A-8575371 rs9629043 rs11510103 SNP_A-8575125 SNP_A-8575115 
+		
+Report: when reading the PLINK genotype file the program will report the advance, this variable sets how often the report the advance (every X number of SNPs).
+
+correlation|cor: this must be a space separated file with: snp1 snp2 correlation_value
+
+Affy_to_rsid: this must be a tab separated file with the first col the Affy id and second the rsid. I use when the PLINK genotype file only has rsids (e.g. HapMap project).
+		SNP_A-8389091	rs7593668
+		SNP_A-8314278	rs1466673
+		SNP_A-8442213	rs550141
+		SNP_A-1987959	rs4896735
+
+verbose|v: let the script print as much as it likes. (I use it for debugging)
+
+
+References
+Frazer KA, Ballinger DG, Cox DR, Hinds DA, Stuve LL et al. (2007) A second generation human haplotype map of over 3.1 million SNPs. Nature 449: 851-861.
+Gao X, Starmer J, Martin ER (2008) A multiple testing correction method for genetic association studies using correlated single nucleotide polymorphisms. Genet Epidemiol 32: 361-369.
+Makambi K (2003) Weighted inverse chi-square method for correlated significance tests. Journal of Applied Statistics 30: 225-234.
+S. Wellek, A. Ziegler. (2009) A Genotype-Based Approach to Assessing the Association Between Single Nucleotide Polymorphisms. Hum Hered 67: 128.

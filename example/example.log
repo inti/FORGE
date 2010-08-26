@@ -1,0 +1,55 @@
+
+@----------------------------------------------------------@
+|        PLINK!       |     v1.07      |   10/Aug/2009     |
+|----------------------------------------------------------|
+|  (C) 2009 Shaun Purcell, GNU General Public License, v2  |
+|----------------------------------------------------------|
+|  For documentation, citation & bug-report instructions:  |
+|        http://pngu.mgh.harvard.edu/purcell/plink/        |
+@----------------------------------------------------------@
+
+Web-based version check ( --noweb to skip )
+Connecting to web... 
+
+          *** UPDATE REQUIRED ***
+
+	This version        : 1.07 
+	Most recent version : 1.06
+
+Please upgrade your version of PLINK as soon as possible!
+  (visit the above website for free download)
+
+Old versions of PLINK (<1.06) contain bugs fixed in 1.06 
+
+Writing this text to log file [ example.log ]
+Analysis started: Thu Jun 24 09:55:44 2010
+
+Options in effect:
+	--bfile example
+	--recode
+	--out example
+
+Reading map (extended format) from [ example.bim ] 
+20 markers to be included from [ example.bim ]
+Reading pedigree information from [ example.fam ] 
+4806 individuals read from [ example.fam ] 
+4806 individuals with nonmissing phenotypes
+Assuming a disease phenotype (1=unaff, 2=aff, 0=miss)
+Missing phenotype value is also -9
+1868 cases, 2938 controls and 0 missing
+2143 males, 2663 females, and 0 of unspecified sex
+Reading genotype bitfile from [ example.bed ] 
+Detected that binary PED file is v1.00 SNP-major mode
+Before frequency and genotyping pruning, there are 20 SNPs
+4806 founders and 0 non-founders found
+Total genotyping rate in remaining individuals is 0.966188
+0 SNPs failed missingness test ( GENO > 1 )
+0 SNPs failed frequency test ( MAF < 0 )
+After frequency and genotyping pruning, there are 20 SNPs
+After filtering, 1868 cases, 2938 controls and 0 missing
+After filtering, 2143 males, 2663 females, and 0 of unspecified sex
+Writing recoded ped file to [ example.ped ] 
+Writing new map file to [ example.map ] 
+
+Analysis finished: Thu Jun 24 09:55:45 2010
+

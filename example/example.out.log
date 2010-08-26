@@ -1,0 +1,14 @@
+Mon Aug  9 22:13:19 2010	LOG file will be written to [ example/example.out.log ]
+Mon Aug  9 22:13:19 2010	Max SNP-to-gene distance allowed [ 20 ] kb
+Mon Aug  9 22:13:19 2010	Read Gene List command line [ foo  ]
+Mon Aug  9 22:13:19 2010	Reading AFFY to rsID mapping from [ affy_to_rsID.tab ]
+Mon Aug  9 22:13:24 2010	Reading association file: [ example/example.assoc ]
+Mon Aug  9 22:13:24 2010	[ 19 ] SNPs with association data
+Mon Aug  9 22:13:24 2010	Reading SNPs info from [ example/example.bim ]
+Mon Aug  9 22:13:24 2010	[ 20 ] SNPs on BED file
+Mon Aug  9 22:13:24 2010	Reading samples info from [ example/example.fam ]
+Mon Aug  9 22:13:24 2010	[ 4806 ] samples read
+Mon Aug  9 22:13:24 2010	Reading gene to SNP mapping file from [ example/example.snpmap ]
+Mon Aug  9 22:13:24 2010	  '->[ 0 ] Genes will be analyzed
+Mon Aug  9 22:13:24 2010	  '->[ 0 ] SNPs mapped to Genes and with association results will be analyzed
+Mon Aug  9 22:13:24 2010	No genes mapped

@@ -1,0 +1,48 @@
+v 0.9
+- added exit codes. 0 = successful end and 1 failure.
+
+v 0.8
+- minor bugs
+- fix error in help manual. It had -file instead of -bfile 
+- warning added if not neither of the options --all_genes, --genes nor --gene_list is used. the program will --all_genes as default.
+- log output file added. name of output file is the name of the output (-out) with .log extension. log file has the same information of the standard output.
+- Major changes in code to read PLINK binary genotype files. Before the file was read SNP-by-SNP. Now the software reads only the information for the SNP mapped by fetching the bytes with the desired genotypes.
+
+v 0.7 
+- reading PLINK PED and MAP files added, new options -ped -map
+- first version of sample level score implemented
+
+v 0.6
+- updated SNP to gene annotation. Now it includes all variants from Esenmbl v56 up to 500 kb away from the start and end of the annotated gene.
+- the SNP to gene annotation has a new format and changes in the script has been made accordingly.
+
+v 0.5
+- correlation among SNPs is now calculated with either Pearson's momentum correlation for categorical variables (see S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009) for details) or the Spearman Rank correlation. The Wellek et al method is less sensible to HWE departures and small sample sizes and of easier and quicker calculation than other LD measures (r-square and D'). However, it sometimes fails for SNPs with low MAF as many counts will be 0.
+- p-values now calculates with the PDL::GSL::CDF module. it make GSL a new requirement. Still very low p-values are set to 0, usually p-values less than E-16. 
+  You can find the GSL library at http://www.gnu.org/software/gsl/. For an easy install on Mac OS check MacPort (http://www.macports.org/, used as well to insall the PDL module) and FINK (www.finkproject.org/). Check those websites for installation on other platforms.
+- following above, removed need for Math::Cephes module.
+- changes in the code to be able to analyze larger samples while keeping memory usage low. Now as far a all SNPs in a gene have been read the gene-pvalues are calculated and the genotypes deleted from the memory. 
+
+v 0.41
+- minor changes in the code
+- minor bug fix
+- option -small_output deprecated. Not printing the *.correlation file is now the default. To print it use the option -print_cor
+- option -r2 deprecated. By default the program will use r2 values. If you want to use r values use option -force_use_r
+
+
+v 0.4
+- Improve SNP LD calculation
+- Added option -small_output. I will not write the *.correlation output file, which can be quite large. 
+- Reading compressed ld files no longer supported
+- I changed the script from a pure PDL script to a Perl one using PDL. In that way is possible to use the Perl functions for debugging.
+ 
+v 0.32
+- added option --r2, it should be used if the correlation measure is r2. The script will use the square-root of this value (the r).
+
+v0.31
+- README and doc updated
+
+v0.3
+- added option to specify lambda value to correct the SNP p-values due to inflation in the statistics
+- option to analyze single chromosome added (-chr)
+- minor bugs fixed

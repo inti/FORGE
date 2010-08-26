@@ -7,7 +7,7 @@ use PDL::Primitive;
 use IO::File;
 use Data::Dumper;
 use Statistics::RankCorrelation;
-#use PDL::Stats::Basic; 
+use PDL::Stats::Basic; 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
       $all_genes, $analysis_chr, $report, $spearman, $affy_to_rsid,

@@ -6,7 +6,6 @@ use PDL::GSL::CDF;
 use PDL::Primitive;
 use PDL::NiceSlice;
 use PDL::Stats::Basic; 
-# use PDL::GSL::RNG;
 use IO::File;
 use IO::Seekable;
 use Fcntl;
@@ -14,7 +13,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.92";
+my $VERSION = "0.93";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
@@ -186,15 +185,14 @@ my @bim = ();
 my @fam = ();
 my $ped_map_genotypes;
 if (defined $bfile) {
-  	# read the bim file with snp information and fam file with sample information
-  	@bim = @{ read_bim("$bfile.bim") };
-  	
-  	@fam = @{ read_fam("$bfile.fam") };
+  # read the bim file with snp information and fam file with sample information
+  @bim = @{ read_bim("$bfile.bim") };
+  @fam = @{ read_fam("$bfile.fam") };
 } elsif (defined $ped and defined $map){
-	my ($fam_ref,$bim_ref);
-	($fam_ref,$ped_map_genotypes,$bim_ref) = read_map_and_ped($ped,$map);
-	@fam = @$fam_ref;
-	@bim = @$bim_ref;
+  my ($fam_ref,$bim_ref);
+  ($fam_ref,$ped_map_genotypes,$bim_ref) = read_map_and_ped($ped,$map);
+  @fam = @$fam_ref;
+  @bim = @$bim_ref;
 }
 my %bim_ids = ();
 my $index = 0;
@@ -208,19 +206,19 @@ open( MAP, $snpmap ) or print_OUT("Can not open [ $snpmap ] file") and exit(1);
 my %gene = ();
 my %snp_to_gene = ();
 while ( my $read = <MAP> ) {
-   chomp($read);
-   # the line is separate in gene info and snps. the section are separated by a tab.
-   my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
-   my @first_snp_n_fields =  split(/\:/,$m[0]);
+  chomp($read);
+  # the line is separate in gene info and snps. the section are separated by a tab.
+  my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
+  my @first_snp_n_fields =  split(/\:/,$m[0]);
   if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 
   # get all mapped snps within the distance threshold,
-   my @mapped_snps = ();
+  my @mapped_snps = ();
   foreach my $s (@m) {
-	my ($id,$pos,$allele,$strand) = split(/\:/,$s);
-	next if (not defined $id);
-	if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-	elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
+    my ($id,$pos,$allele,$strand) = split(/\:/,$s);
+    next if (not defined $id);
+    if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
+    elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
   }
    
    next if (scalar @mapped_snps == 0);
@@ -235,6 +233,7 @@ while ( my $read = <MAP> ) {
    # create a pseudo-hash with the gene info
    $gene{$ensembl} = {
       	'hugo'      => $hugo,
+	'ensembl'   => $ensembl,	
       	'chr'       => $chr,
       	'start'     => $start,
       	'end'       => $end,
@@ -321,35 +320,28 @@ print_OUT("Output file will be written to [ $out ]");
 my $out_fh_sample_score = new IO::File if (defined $sample_score);
 
 if (defined $sample_score){
-	print_OUT("   '-> Sample scores printed to [ $out.sample_score ]");
-	$out_fh_sample_score->open(">$out.sample_score");
-	my $iid = "";
-	my $fid = "";
-	my $pid = "";
-	my $mid = "";
-	my $sex = "";
-	my $pheno = "";
-	for (my $i = 0; $i < scalar @fam; $i++){
-		$iid .= " $fam[$i]->{iid}";
-		$fid .= " $fam[$i]->{fid}";
-		$pid .= " $fam[$i]->{pid}";
-		$mid .= " $fam[$i]->{mid}";
-		$sex .= " $fam[$i]->{sex}";
-		$pheno .= " $fam[$i]->{pheno}";
-	}
-	print $out_fh_sample_score "IID IID$iid\n";
-	print $out_fh_sample_score "FID FID$fid\n";
-	print $out_fh_sample_score "PID PID$pid\n";
-	print $out_fh_sample_score "MID MID$mid\n";
-	print $out_fh_sample_score "SEX SEX$sex\n";
-	print $out_fh_sample_score "TRAIT BD$pheno\n";
-	
-# 	my $rng = PDL::GSL::RNG->new('taus');
-# 	$rng->set_seed(time()*$$);
-# 	my $a=zeroes(5,5,5)
-# 	$rng->get_uniform($a);
-# 	print $a;
-# 	getc;
+  print_OUT("   '-> Sample scores printed to [ $out.sample_score ]");
+  $out_fh_sample_score->open(">$out.sample_score");
+  my $iid = "";
+  my $fid = "";
+  my $pid = "";
+  my $mid = "";
+  my $sex = "";
+  my $pheno = "";
+  for (my $i = 0; $i < scalar @fam; $i++){
+    $iid .= " $fam[$i]->{iid}";
+    $fid .= " $fam[$i]->{fid}";
+    $pid .= " $fam[$i]->{pid}";
+    $mid .= " $fam[$i]->{mid}";
+    $sex .= " $fam[$i]->{sex}";
+    $pheno .= " $fam[$i]->{pheno}";
+  }
+  print $out_fh_sample_score "IID IID$iid\n";
+  print $out_fh_sample_score "FID FID$fid\n";
+  print $out_fh_sample_score "PID PID$pid\n";
+  print $out_fh_sample_score "MID MID$mid\n";
+  print $out_fh_sample_score "SEX SEX$sex\n";
+  print $out_fh_sample_score "TRAIT BD$pheno\n";
 }
 
 #start count to report advance 
@@ -358,7 +350,7 @@ print_OUT("Starting to Calculate gene p-values");
 
 # if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 unless (scalar keys %gene < 100){
-	  $report = int((scalar keys %gene)/100 + 0.5)*10;
+  $report = int((scalar keys %gene)/100 + 0.5)*10;
 }
 # if user defined a genotypes file. read genotypes and store a genotype matrix (rows: samples, cols: genotypes)for each gene 
 if (defined $bfile) {
@@ -413,30 +405,30 @@ if (defined $bfile) {
     &report_advance($count,$report,"Genes");	
  }
 } elsif (defined $ped and defined $map){
-	my $genotypes = pdl @{ $ped_map_genotypes };
-	foreach (my $index_snp = 0; $index_snp <  scalar @bim; $index_snp++){
-		# store SNP genotypes only if it has association data
-		if (exists $assoc_data{ ${ $bim[$index_snp] }{snp_id} } ){
-			# for every gene mapped to this SNP, push inside the genotype matrix this SNP genotypes.
-			foreach my $gn (@{ $snp_to_gene{${ $bim[$index_snp] }{snp_id} } }){
-				if (defined $v){ print_OUT("Adding SNP [  ${ $bim[$index_snp] }{snp_id}  ] to genotypes of $gn"); }
-				next if ( grep $_ eq ${ $bim[$index_snp] }{snp_id} , @{ $gene{$gn}->{geno_mat_rows} } );
-				# add the genotypes to the genotype matrix
-				$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->glue(1,$genotypes(,$index_snp));
-				push @{ $gene{$gn}->{geno_mat_rows} }, ${ $bim[$index_snp] }{snp_id};
-				push @{ $gene{$gn}->{pvalues} }, $assoc_data{ ${ $bim[$index_snp] }{snp_id} }->{pvalue};
-				if (scalar @{ $gene{$gn}->{snps} } == scalar @{ $gene{$gn}->{geno_mat_rows} }){
-				  &gene_pvalue($gn);
-				  delete($gene{$gn});
-				  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
-				  unless (scalar keys %gene < 100){
-					  my $report = int((scalar keys %gene)/100 + 0.5)*10;
-					  &report_advance($count,$report,"GENES");
-				  }
-				}
-			}
-		}
+  my $genotypes = pdl @{ $ped_map_genotypes };
+  foreach (my $index_snp = 0; $index_snp <  scalar @bim; $index_snp++){
+    # store SNP genotypes only if it has association data
+    if (exists $assoc_data{ ${ $bim[$index_snp] }{snp_id} } ){
+      # for every gene mapped to this SNP, push inside the genotype matrix this SNP genotypes.
+      foreach my $gn (@{ $snp_to_gene{${ $bim[$index_snp] }{snp_id} } }){
+	if (defined $v){ print_OUT("Adding SNP [  ${ $bim[$index_snp] }{snp_id}  ] to genotypes of $gn"); }
+	next if ( grep $_ eq ${ $bim[$index_snp] }{snp_id} , @{ $gene{$gn}->{geno_mat_rows} } );
+	# add the genotypes to the genotype matrix
+	$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->glue(1,$genotypes(,$index_snp));
+	push @{ $gene{$gn}->{geno_mat_rows} }, ${ $bim[$index_snp] }{snp_id};
+	push @{ $gene{$gn}->{pvalues} }, $assoc_data{ ${ $bim[$index_snp] }{snp_id} }->{pvalue};
+	if (scalar @{ $gene{$gn}->{snps} } == scalar @{ $gene{$gn}->{geno_mat_rows} }){
+	  &gene_pvalue($gn);
+	  delete($gene{$gn});
+	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
+	  unless (scalar keys %gene < 100){
+	    my $report = int((scalar keys %gene)/100 + 0.5)*10;
+	    &report_advance($count,$report,"GENES");
+	  }
 	}
+      }
+    }
+  }
 }else {
   print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness");
 }
@@ -447,18 +439,20 @@ if (defined $bfile) {
 $out_fh_sample_score->close() if (defined $sample_score);
 # if the user want to get the correlation values print the *.correlation file
 if (defined $print_cor){
-	  open (COR,">$out.correlation") or print_OUT("Cannot open [ $out.correlation ] to write to") and exit(1);
-	  foreach my $snp1 (keys %correlation) {
-		 foreach my $snp2 (keys %{$correlation{$snp1}}  ) {
-			next if ($snp1 eq $snp2);
-			printf COR ("$snp1 $snp2 %.3f\n",abs($correlation{ $snp1 }{ $snp2 }));
-			delete($correlation{ $snp1 }{ $snp2 });
-		 }
-	  }
-	  close(COR);
+  open (COR,">$out.correlation") or print_OUT("Cannot open [ $out.correlation ] to write to") and exit(1);
+  foreach my $snp1 (keys %correlation) {
+    foreach my $snp2 (keys %{$correlation{$snp1}}  ) {
+      next if ($snp1 eq $snp2);
+      printf COR ("$snp1 $snp2 %.3f\n",abs($correlation{ $snp1 }{ $snp2 }));
+      delete($correlation{ $snp1 }{ $snp2 });
+    }
+  }
+  close(COR);
 }
 print_OUT("Well Done!!");
 exit(0);
+
+
 sub extract_binary_genotypes {
   my $n_genotypes = shift; # number of genotypes per SNP
   my $bytes_per_snp = shift; # number of bytes needed to code the SNP
@@ -483,6 +477,7 @@ sub get_genotypes {
   my @back = ();
   my @genotypes = ( $b =~ m/\d{2}/g ); # extract a pair of number = a genotype
   foreach my $geno (@genotypes){
+    # 10 indicates missing genotype, otherwise 0 and 1 point to allele 1 or allele 2 in the BIM file, respectively
     if    ( $geno eq '00' ) {  # homozygous 1/1
       push @back, '1';
     } elsif ( $geno eq '11' ) { # -- other homozygous 2/2
@@ -578,37 +573,56 @@ sub gene_pvalue {
    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $weight\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
+  # finally if requested calculate the gene-score for all samples
+  &sample_score($gene{$gn},\%assoc_data,$cor) if (defined $sample_score);
+}
 
-  if (defined $sample_score){
-    my @snp_info = map { $assoc_data{$_}; } @{ $gene{$gn}->{geno_mat_rows} } ;
-    # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
-    # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
-    my ($n_samples,$n_snps) = $gene{$gn}->{genotypes}->dims;
-    my $out_line = "$gn $gene{$gn}->{hugo}";
-    for (my $person = 0; $person < $n_samples; $person++){
-	    my @genotypes = $gene{$gn}->{genotypes}->($person,)->list;
-	    my @tmp = ();
-	    foreach my $g (@genotypes) {
-		    if ($g == 1) { push @tmp, 2; }
-		    if ($g == 2) { push @tmp, 1; }
-		    if ($g == 3) { push @tmp, 0; }
-		    if ($g == 0) { push @tmp, 0; }
-	    }
-	    my $sample_w = pdl @tmp;
-	    my @tmp_or = ();
-	    for my $snp (@snp_info){
-		    if ($snp->{or} < 1 ){ push @tmp_or, 1/$snp->{or};}
-		    else { push @tmp_or, $snp->{or}; }
-	    }
-	    $sample_w *= pdl @tmp_or;
-	    $sample_w += 1/$n_snps;
-	    $sample_w /= $sample_w->sumover;
-	    my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor,$sample_w,$gene{$gn}->{pvalues});
-	    my $fisher_p_value_galwey = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
-	    $out_line .= " $fisher_p_value_galwey";
+# this subroutine calcultes a gene-score for each sample
+# inputs are the gene pseudo-hash, the association p-values and the correlation matrix
+sub sample_score {
+  my $gene = shift; # pseudohash with gene information
+  my $assoc = shift; # ref to a hash
+  my $cor_matrix = shift; # pdl matrix object
+  my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
+  # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
+  # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
+  my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
+  my $out_line = "$gene->{ensembl} $gene->{hugo}";
+  for (my $person = 0; $person < $n_samples; $person++){
+    my @genotypes = $gene->{genotypes}->($person,)->list;
+    my @tmp_allele = ();
+    my @tmp_or = ();
+    for (my $g = 0; $g < scalar @genotypes; $g++) {
+      # store counts of minor alleles
+      my $geno = $genotypes[$g];
+      if ($snp_info[$g]->{or} < 1){ # the minor allele is the protective allele
+	push @tmp_or, 1/$snp_info[$g]->{or};
+	if ($geno == 1) { push @tmp_allele, 0; }
+        if ($geno == 2) { push @tmp_allele, 1; }
+	if ($geno == 3) { push @tmp_allele, 2; }
+        if ($geno == 0) { push @tmp_allele, 0; }
+      } else { # the minor allele is the risk allele
+	push @tmp_or, $snp_info[$g]->{or};
+	if ($geno == 1) { push @tmp_allele, 2; }
+	if ($geno == 2) { push @tmp_allele, 1; }
+	if ($geno == 3) { push @tmp_allele, 0; }
+	if ($geno == 0) { push @tmp_allele, 0; }
+      }
     }
-    print $out_fh_sample_score "$out_line\n";
+    # multiply the risk allele count by the odd ratio for that allele
+    my $sample_w = pdl @tmp_allele;
+    $sample_w *= pdl @tmp_or;
+    # make sure not weigth is equal to 0
+    $sample_w += 1/$n_snps;
+    # make sure they add one
+    $sample_w /= $sample_w->sumover;
+    # calculate the FORGE statistics using the sample weights
+    my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
+    # get the p-value
+    my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
+    $out_line .= " $sample_score_p_value";
   }
+  print $out_fh_sample_score "$out_line\n";
 }
 
 # this subroutine applies the makambi method to combine p-values from correlated test
@@ -622,8 +636,8 @@ sub get_makambi_chi_square_and_df {
   $w /= $w->sumover;
   my $pvalues = shift; # a pdl vector with the p-values to be combined
   # calculate the correlation matrix before the applying the weights
-  my $COR_MAT = (3.25*abs($cor) + 0.75*abs($cor)**2);
-  my $second = $COR_MAT*$w*$w->transpose; # apply the weights 
+  my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
+  my $second = $COR_MAT*$w*($w->transpose); # apply the weights 
   ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
   my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics
   my $df = 8/$varMf_m; # the degrees of freedom of the test statistic
@@ -927,7 +941,8 @@ script [options]
  	-lambda			lambda value to correct SNP statistics, if genomic control is used
  	-print_cor		print out SNP-SNP correlations
  	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
- 	-distance, -d		Max SNP-to-gene distance allowed (in kb) 
+ 	-distance, -d		Max SNP-to-gene distance allowed (in kb)
+	-sample_score		Generate sample level score (it requieres sample level genotypes)
 
 
 =head1 OPTIONS
@@ -1015,13 +1030,15 @@ print out SNP-SNP correlations
 
 =item B<-pearson_genotypes>
 
-Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+Calculate SNP-SNP correlation with a pearson correlation for categorical variables as described on S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
 
 =item B<-distance, -d>
 
 Max SNP-to-gene distance allowed (in kb) 
 
+=item B<-sample_score>
 
+Generate a gene-score for each gene. This method make use of the FORGE method but uses information from risk alleles count and their odd-ratios as weights for each SNP. The calculation is repeated on each sample, generating one gene-score for each sample. Because the p-values used are the same for all samples this score carries information about the combination of risk alleles and their odd-ratios. However, it is different from using simply the count of risk alleles because it account for the LD between the SNPs. This method is still under development and the documentation will be completed later.
 
 =back
 

@@ -1,3 +1,7 @@
+v 0.93
+- output format change. now only SIDAK and FORGE p-values are reported.
+- sample score is implemented and partoally documented. the score is calculated by using the association odd-ratios and the risk allele counts for each sample. For each sample the weight are calculated by 1) counting the number of risk alleles at each SNP, the minor allele is assumed to be the risk allele. if the OR is < 1 then the major allele is counted as the risk allele. 2) all OR are expressed as risk (all > 1) 3) the risk allele count and the OR is multiply for each SNP, 4) at each weight we sum 1/number_snps to ensure no weight is equal to 0 and 5) weight are normalize to sum 1. This genarates a set of weights for each sample and for each sample we calculete the FORGE p-values.
+
 v 0.91 
 - new sbrountine to handle makambi statistic in only one place
 

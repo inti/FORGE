@@ -14,7 +14,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.91";
+my $VERSION = "0.92";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
@@ -504,8 +504,8 @@ sub gene_pvalue {
    next if ($n_snps == 0);
    # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
 	  if ($n_snps == 1){
-			if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-			printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
+			if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
+			printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
 			delete($gene{$gn});
 			return(); }
    #if the user defined a genotype file then we need to get the number of SNPs in the gene.
@@ -572,7 +572,7 @@ sub gene_pvalue {
     if (defined $v){ print_OUT("Weigth = [ $weight ]"); }
     my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$weight,$gene{$gn}->{pvalues});
 
-   my $fisher_p_value =   1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
+   my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
    # print out the results
    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
@@ -580,37 +580,35 @@ sub gene_pvalue {
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
 
   if (defined $sample_score){
-   	my @snp_info = map { $assoc_data{$_}; } @{ $gene{$gn}->{geno_mat_rows} } ;
-	# alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
-	# risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
-	my ($n_samples,$n_snps) = $gene{$gn}->{genotypes}->dims;
-	my $out_line = "$gn $gene{$gn}->{hugo}";
-	for (my $person = 0; $person < $n_samples; $person++){
-		my @genotypes = $gene{$gn}->{genotypes}->($person,)->list;
-		my @tmp = ();
-		foreach my $g (@genotypes) {
-			if ($g == 1) { push @tmp, 2; }
-			if ($g == 2) { push @tmp, 1; }
-			if ($g == 3) { push @tmp, 0; }
-			if ($g == 0) { push @tmp, 0; }
-		}
-		my $sample_w = pdl @tmp;
-		my @tmp_or = ();
-		for my $snp (@snp_info){
-			if ($snp->{or} < 1 ){ push @tmp_or, 1/$snp->{or};}
-			else { push @tmp_or, $snp->{or}; }
-		}
-		$sample_w *= pdl @tmp_or;
-		$sample_w += 1/$n_snps;
-		$sample_w /= $sample_w->sumover;
-		my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor,$sample_w,$gene{$gn}->{pvalues});
-		my $fisher_p_value_galwey = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
-		$out_line .= " $fisher_p_value_galwey";
-	}
-	print $out_fh_sample_score "$out_line\n";
-   }
-   
-
+    my @snp_info = map { $assoc_data{$_}; } @{ $gene{$gn}->{geno_mat_rows} } ;
+    # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
+    # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
+    my ($n_samples,$n_snps) = $gene{$gn}->{genotypes}->dims;
+    my $out_line = "$gn $gene{$gn}->{hugo}";
+    for (my $person = 0; $person < $n_samples; $person++){
+	    my @genotypes = $gene{$gn}->{genotypes}->($person,)->list;
+	    my @tmp = ();
+	    foreach my $g (@genotypes) {
+		    if ($g == 1) { push @tmp, 2; }
+		    if ($g == 2) { push @tmp, 1; }
+		    if ($g == 3) { push @tmp, 0; }
+		    if ($g == 0) { push @tmp, 0; }
+	    }
+	    my $sample_w = pdl @tmp;
+	    my @tmp_or = ();
+	    for my $snp (@snp_info){
+		    if ($snp->{or} < 1 ){ push @tmp_or, 1/$snp->{or};}
+		    else { push @tmp_or, $snp->{or}; }
+	    }
+	    $sample_w *= pdl @tmp_or;
+	    $sample_w += 1/$n_snps;
+	    $sample_w /= $sample_w->sumover;
+	    my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor,$sample_w,$gene{$gn}->{pvalues});
+	    my $fisher_p_value_galwey = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
+	    $out_line .= " $fisher_p_value_galwey";
+    }
+    print $out_fh_sample_score "$out_line\n";
+  }
 }
 
 # this subroutine applies the makambi method to combine p-values from correlated test

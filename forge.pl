@@ -13,11 +13,11 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.93";
+my $VERSION = "0.94";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
-      $all_genes, $analysis_chr, $report, $spearman, $affy_to_rsid,
+      $all_genes, $analysis_chr, $report, $spearman, $affy_to_rsid, @weights_file, $w_header,
       $v,  $lambda,$print_cor, $pearson_genotypes,$distance, $sample_score, $ped, $map);
 
 GetOptions(
@@ -42,6 +42,8 @@ GetOptions(
    'pearson_genotypes' => \$pearson_genotypes,
    'distance|d=i' => \$distance, 
    'sample_score' => \$sample_score,
+   'weights|w=s' => \@weights_file,
+   'w_header' => \$w_header,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -148,7 +150,7 @@ while (  my $a = <ASSOC> ) {
    # correct for genomic control if a lambda > 1 was specified.
   my $A2 = "NA";
   my $A1 = "NA";
-  my $OR = "NA";
+  my $OR = 1;
   if (exists $header{"A2"}){ $A2 = $data[$header{"A2"}];}
   if (exists $header{"A1"}){ $A1 = $data[$header{"A1"}];}
   if (exists $header{"OR"}){ $OR = $data[$header{"OR"}];}
@@ -242,6 +244,7 @@ while ( my $read = <MAP> ) {
       	'minp'      => -9,
       	'genotypes' => null,
       	'geno_mat_rows' => [],
+        'weights' => null,
 	'pvalues' => [],
 	'gene_status' => $gene_status,
 	'desc' => $description,
@@ -344,6 +347,27 @@ if (defined $sample_score){
   print $out_fh_sample_score "TRAIT BD$pheno\n";
 }
 
+# create a variable that will store a ref to a hash with the weights
+my $weights = {};
+if (defined @weights_file){
+    print_OUT("Starting to read SNP weigths");
+    # create hash refs to store the name of the weight categories
+    my $w_classes = {};
+    my $w_counter = 0; # category counter, in case the file has not a header.
+    # loop over the files and read the weights
+    foreach my $w_f (@weights_file){
+        ($weights,$w_counter,$w_classes) = read_weight_file($w_f,$w_counter,$w_classes,$weights, $w_header,\%snp_to_gene);
+    }
+    print_OUT("  '-> [ " . scalar (keys %{$weights}) . " ] weights read");
+    # make a single weight vector for each snp
+    foreach my $snp (keys %{$weights}){
+        # get the snp weights sorted by category name
+        my @tmp_all_w = map { $weights->{$snp}{$_}; } sort {$a cmp $b} keys %{ $w_classes };
+        # make piddle
+        $weights->{$snp} = [@tmp_all_w];
+    }
+}
+
 #start count to report advance 
 my $count = 0;
 print_OUT("Starting to Calculate gene p-values");
@@ -397,6 +421,15 @@ if (defined $bfile) {
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
+    # Calculate the weights for the gene
+    if (defined @weights_file){
+        $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
+    } else {
+        my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
+        $gene{$gn}->{weights} = ones $n_snps;
+        $gene{$gn}->{weights} *= 1/$n_snps;
+        $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+    }
     # calculate gene p-values
     &gene_pvalue($gn);
     # delete the gene's data to keep memory usage low
@@ -417,7 +450,15 @@ if (defined $bfile) {
 	$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->glue(1,$genotypes(,$index_snp));
 	push @{ $gene{$gn}->{geno_mat_rows} }, ${ $bim[$index_snp] }{snp_id};
 	push @{ $gene{$gn}->{pvalues} }, $assoc_data{ ${ $bim[$index_snp] }{snp_id} }->{pvalue};
-	if (scalar @{ $gene{$gn}->{snps} } == scalar @{ $gene{$gn}->{geno_mat_rows} }){
+        if (scalar @{ $gene{$gn}->{snps} } == scalar @{ $gene{$gn}->{geno_mat_rows} }){
+            if (defined @weights_file){
+            $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
+        } else {
+            my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
+            $gene{$gn}->{weights} = ones $n_snps;
+            $gene{$gn}->{weights} *= 1/$n_snps;
+            $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+        }
 	  &gene_pvalue($gn);
 	  delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
@@ -435,7 +476,6 @@ if (defined $bfile) {
  
 
 # loop over all genes and calculate the gene p-values
-
 $out_fh_sample_score->close() if (defined $sample_score);
 # if the user want to get the correlation values print the *.correlation file
 if (defined $print_cor){
@@ -452,6 +492,34 @@ if (defined $print_cor){
 print_OUT("Well Done!!");
 exit(0);
 
+sub generate_weights_for_a_gene {
+    my $snps = shift;
+    my $weights = shift;
+    # get the weights for each snp in the gene
+    # if there are no weights for an SNP all will be set to 0. Meaning
+    # This SNP will get the min weight in all categories present.
+    my @w_mat_rows = ();
+    foreach my $s (@{$snps}) {
+        if (not exists $weights->{$s}) { $weights->{$s} = []; }
+        push @w_mat_rows, $weights->{$s};
+    }
+    # make a matrix with the weigths and get its dimensions
+    my $W = pdl @w_mat_rows;
+    $W = abs($W);
+    @w_mat_rows = ();
+    my @dims = $W->dims();
+    # re-scale the weights to make them sum 1 on each category (columns)
+    for (my $i = 0; $i < $dims[0]; $i++) {
+        next if ($W->($i,)->flat->sumover == 0);
+        $W->($i,) /= $W->($i,)->flat->sumover;
+    }
+    # sum the weight for each snp
+    $W = pdl map { $W->(,$_)->flat->sum; } 0 .. $dims[1] - 1;
+    # make the weight for the gene sum 1.
+    $W += $W->(which($W > 0))->min;
+    $W /= $W->sum;
+    return($W);
+}
 
 sub extract_binary_genotypes {
   my $n_genotypes = shift; # number of genotypes per SNP
@@ -492,23 +560,24 @@ sub get_genotypes {
 }
 
 sub gene_pvalue {
-	my $gn = shift;
-   if (defined $v){ print_OUT("____ $gn ____"); }
-   if (not defined $bfile){ @{ $gene{$gn}->{geno_mat_rows}} = @{ $gene{$gn}->{snps}}; }
-   my $n_snps = scalar @{ $gene{$gn}->{geno_mat_rows}};
-   next if ($n_snps == 0);
-   # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
-	  if ($n_snps == 1){
-			if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-			printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
-			delete($gene{$gn});
-			return(); }
-   #if the user defined a genotype file then we need to get the number of SNPs in the gene.
-   # if the user did not defined neither a genotype nor a file with the SNP-SNP correlations exit the program
-   unless (defined $bfile or defined $spearman or defined $ped) {
-    print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
-    exit(1);
-  }
+    my $gn = shift;
+    if (defined $v){ print_OUT("____ $gn ____"); }
+    if (not defined $bfile){ @{ $gene{$gn}->{geno_mat_rows}} = @{ $gene{$gn}->{snps}}; }
+    my $n_snps = scalar @{ $gene{$gn}->{geno_mat_rows}};
+    next if ($n_snps == 0);
+    # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
+	if ($n_snps == 1){
+            if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
+            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
+            delete($gene{$gn});
+            return();
+        }
+    #if the user defined a genotype file then we need to get the number of SNPs in the gene.
+    # if the user did not defined neither a genotype nor a file with the SNP-SNP correlations exit the program
+    unless (defined $bfile or defined $spearman or defined $ped) {
+        print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
+        exit(1);
+    }
    
    if (defined $v){ print_OUT("Calculating correlation matrix for $n_snps SNPs with association data"); }
    # initialize correlation matrix with zeroes
@@ -561,17 +630,14 @@ sub gene_pvalue {
    # get the log of the SNP p-value
    $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
    # calculate the chi-square statistics for the Makambi method and its p-value
-   my $weight = ones $n_snps;
-    $weight *= 1/$n_snps;
-    $weight /= $weight->sumover;
-    if (defined $v){ print_OUT("Weigth = [ $weight ]"); }
-    my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$weight,$gene{$gn}->{pvalues});
+    if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]"); }
+   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
    # print out the results
    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
-   if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $weight\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
+   if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
   # finally if requested calculate the gene-score for all samples
   &sample_score($gene{$gn},\%assoc_data,$cor) if (defined $sample_score);
@@ -613,8 +679,11 @@ sub sample_score {
     my $sample_w = pdl @tmp_allele;
     $sample_w *= pdl @tmp_or;
     # make sure not weigth is equal to 0
-    $sample_w += 1/$n_snps;
+    $sample_w += $sample_w->(which($sample_w > 0))->min;
     # make sure they add one
+    $sample_w /= $sample_w->sumover;
+    # multiply by the SNP weigths
+    $sample_w *= $gene->{weights};
     $sample_w /= $sample_w->sumover;
     # calculate the FORGE statistics using the sample weights
     my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
@@ -622,6 +691,9 @@ sub sample_score {
     my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
     $out_line .= " $sample_score_p_value";
   }
+  ## TODO ##
+  # implement the association between the sample score and the phenotype.
+  # use a regression with the adecuate covariates. the -covariate option must be implemented for this
   print $out_fh_sample_score "$out_line\n";
 }
 
@@ -911,6 +983,52 @@ sub print_OUT {
   print LOG scalar localtime(), "\t$string\n";
 }
 
+sub read_weight_file {
+    my $file = shift; # file name
+    my $w_counter = shift; # weigth counter, to be use if the file has not header
+    my $class_names =shift; # header of weights 
+    my $weights = shift; # weight for each snp
+    my $header_present = shift;
+    my $snp_2_gene = shift;
+    print_OUT("  '-> Reading weigths from [ $file ]");
+    open (WEIGHTS,$file) or print_OUT("I cannot open [ $file ]") and exit(1);
+    my $count = 0;
+    my $w_header = ();
+    while(my $line = <WEIGHTS>){
+        chomp($line);
+        my ($snp_id,@w) = split(/[\s\t\,]/,$line);
+        if ( defined $affy_to_rsid ) {
+            if ($snp_id !~ m/^rs/){
+                if (exists $affy_id{$snp_id}){ $snp_id = $affy_id{$snp_id};}
+            }
+        }
+        # if it is the first line check if the user declared header in the file
+        if ($count == 0){
+            if (defined $header_present){
+                $w_header = get_header([@w]);
+                $count++;
+                next;
+            } else {
+                map {   $w_header->{$w_counter} = $w_counter;
+                        $w_counter++;
+                    } @w;
+            }
+            $count++;
+        }
+        next if (not exists $snp_2_gene->{$snp_id});
+        foreach my $category (sort { $w_header->{$a} <=> $w_header->{$b} } keys %{$w_header}){
+            my $val = $w[$w_header->{$category}];
+            $val = 0 if ($val eq "NA");
+            $val = 0 if ($val eq "");
+            $weights->{$snp_id}{$category} = $val;
+            $class_names->{$category} = "";
+        }
+    }
+    close(WEIGHTS);
+    return($weights,$w_counter,$class_names);
+}
+
+
 __END__
 
 =head1 NAME
@@ -926,23 +1044,33 @@ script [options]
  	-report			how often to report advance
  	-verbose, -v		useful for debugging
  	
+        Input Files:
  	-ped			Genotype file in PLINK PED format
  	-map			SNP info file in PLINK MAP format
  	-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam. 
- 	-out, -o		Name of the output file
  	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
- 	-gene_list, -g		Only analyse genes on the file provided
+        -snpmap, -m		Snp-to-gene mapping file
+ 	-affy_to_rsid		Affy id to rs id mapping file
+ 	
+        Output Files:
+ 	-out, -o		Name of the output file
+ 	-print_cor		print out SNP-SNP correlations
+ 	
+        Analsis modifiers:
+        -gene_list, -g		Only analyse genes on the file provided
  	-genes			Provide some gene name in command line, only these genes will be analyzed
  	-all_genes		Analyze all genes in the snp-to-gene mapping file
  	-chr			Anlyze a specific chromosome  
- 	-snpmap, -m		Snp-to-gene mapping file
- 	-correlation, -cor	SNP-SNP correlation file
- 	-affy_to_rsid		Affy id to rs id mapping file
- 	-lambda			lambda value to correct SNP statistics, if genomic control is used
- 	-print_cor		print out SNP-SNP correlations
- 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
  	-distance, -d		Max SNP-to-gene distance allowed (in kb)
-	-sample_score		Generate sample level score (it requieres sample level genotypes)
+	-correlation, -cor	SNP-SNP correlation file
+ 	-lambda			lambda value to correct SNP statistics, if genomic control is used
+ 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+        -weights, -w            File with SNP weights
+        -w_header               Indicate if the SNP weight file has a header.
+ 	
+        Sample Score Analysis:
+        -sample_score		Generate sample level score (it requieres sample level genotypes).
+        -covariates, -cov       File with covariates for the sample level analysis (TO BE IMPLEMENTED)
 
 
 =head1 OPTIONS
@@ -1039,6 +1167,18 @@ Max SNP-to-gene distance allowed (in kb)
 =item B<-sample_score>
 
 Generate a gene-score for each gene. This method make use of the FORGE method but uses information from risk alleles count and their odd-ratios as weights for each SNP. The calculation is repeated on each sample, generating one gene-score for each sample. Because the p-values used are the same for all samples this score carries information about the combination of risk alleles and their odd-ratios. However, it is different from using simply the count of risk alleles because it account for the LD between the SNPs. This method is still under development and the documentation will be completed later.
+
+=item B<-weights, -w>
+
+File with SNP weights. Multiple files with weights can be used by providing the -weights for each file. the file with weigths can be tab, space or comma separated.
+the first columns must be the snp id and the rest the weights. It is possible to have a header in the file, in which case you must use the option -w_header as well. SNP weights are use in the gene analysis and
+to calculate the sample scores. How to use different sources of information to make a simple weight for the SNP is a not trivial issue. To simplify things I: a) for each gene's SNPs I make the weight of each category sum 1,
+b) then I sum these re-sacel weights for each SNP and c) finally make sure the weight within the gene sum 1.
+Please note that SNPs without weights will internally get the weights set to zero. 
+
+=item B<-w_header>
+
+Indicate if the SNP weight file has a header.
 
 =back
 

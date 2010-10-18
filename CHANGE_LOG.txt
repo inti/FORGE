@@ -3,7 +3,7 @@ v 0.94
 the first columns must be the snp id and the rest the weights. It is possible to have a header in the file, in which case you must use the option -w_header as well. SNP weights are use in the gene analysis and
 to calculate the sample scores. How to use different sources of information to make a simple weight for the SNP is a not trivial issue. To simplify things I: a) for each gene's SNPs I make the weight of each category sum 1,
 b) then I sum these re-sacel weights for each SNP and c) finally make sure the weight within the gene sum 1.
-- 
+
 
 v 0.93
 - output format change. now only SIDAK and FORGE p-values are reported.
@@ -45,7 +45,7 @@ v 0.41
 
 
 v 0.4
-- Improve SNP LD calculation
+- Improved SNP LD calculation
 - Added option -small_output. I will not write the *.correlation output file, which can be quite large. 
 - Reading compressed ld files no longer supported
 - I changed the script from a pure PDL script to a Perl one using PDL. In that way is possible to use the Perl functions for debugging.

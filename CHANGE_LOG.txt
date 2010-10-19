@@ -1,3 +1,13 @@
+v 0.95
+- Changes to the weigthing method: a) for eacg category (columns in the weigths file) the values are scale to be between 0 and 1. Before they were re-scale to sum 1.
+b) weights are across categories are summed instead of multuplied c) weights are corrected by the LD. the idea behind this is that array SNPs are proxies so if two LD are
+in high LD and prior beleive of the functional information must be similar. The weights are modified by calculating the weighted avarage across the gene:
+w_i_new = ( 1/SUM_i_n(w_i_old) ) * SUM_i_n(c_i_j * w_j_old), where w_i_new is the LD corrected weight calculated for the n SNPs, c_i_j is the correlation between SNPs i and j and w_j_old is the NON LD corrected
+weigth for SNP j.
+- new option to handle genotype probabilites for the sample socore analysis. Option -ox_gprobs will receive the path to a file with genotype probabilites in OXFORD FORMAT. see http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html
+for more information on the file format.
+
+
 v 0.94
 - now SNP weights cn be input with the option -weights. Multiple files with weights can be used by providing the -weights for each file. the file with weigths can be tab, space or comma separated.
 the first columns must be the snp id and the rest the weights. It is possible to have a header in the file, in which case you must use the option -w_header as well. SNP weights are use in the gene analysis and

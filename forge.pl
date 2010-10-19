@@ -5,7 +5,8 @@ use PDL;
 use PDL::GSL::CDF;
 use PDL::Primitive;
 use PDL::NiceSlice;
-use PDL::Stats::Basic; 
+use PDL::Stats::Basic;
+use PDL::Bad;
 use IO::File;
 use IO::Seekable;
 use Fcntl;
@@ -13,12 +14,15 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.94";
+my $VERSION = "0.95";
 
 
-our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list, @genes,
-      $all_genes, $analysis_chr, $report, $spearman, $affy_to_rsid, @weights_file, $w_header,
-      $v,  $lambda,$print_cor, $pearson_genotypes,$distance, $sample_score, $ped, $map);
+our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
+    @genes, $all_genes, $analysis_chr, $report, $spearman,
+    $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
+    $print_cor, $pearson_genotypes,$distance, $sample_score,
+    $ped, $map, $ox_gprobs,
+);
 
 GetOptions(
    'help|h' => \$help,
@@ -44,6 +48,7 @@ GetOptions(
    'sample_score' => \$sample_score,
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
+   'ox_gprobs=s' => \$ox_gprobs,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -69,6 +74,31 @@ defined $print_cor and print_OUT("Defined -print_cor: I will print the *.correla
 defined $out or $out = "gene_based_fisher_v041.OUT";
 # tell if user wants to correct p-values by genomic control 
 if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]");}
+
+my $geno_probs = undef;
+if (defined $ox_gprobs and defined $sample_score) {
+    $geno_probs = $ox_gprobs ;
+    print_OUT("Genotype probabilities in OXFORD format will be read from [ $geno_probs ]");
+}
+
+my ($gprobs, $gprobs_index);
+if (defined $geno_probs and defined $sample_score){
+    $gprobs = IO::File->new();
+    $gprobs_index = IO::File->new();
+    
+#    if (not -e "$geno_probs.idx") {
+    print_OUT("   '-> Making index for genotype probabilities in [ $geno_probs.idx ] file");
+    $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
+    $gprobs_index->open("+>$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n");
+    build_index(*$gprobs, *$gprobs_index);
+        
+=head    } else {
+        print_OUT("   '-> Found [ $geno_probs.idx ] file, will use it to read the genotype probabilities. Please delete if you do not want to use this file.");
+        $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
+        $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n") and exit(1);
+    }
+=cut
+} 
 
 open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
 print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
@@ -202,6 +232,8 @@ map {
   $bim_ids{$_->{snp_id}} = $index;
   $index++;
 } @bim;
+
+
 print_OUT("Reading gene to SNP mapping file from [ $snpmap ]");
 
 open( MAP, $snpmap ) or print_OUT("Can not open [ $snpmap ] file") and exit(1);
@@ -508,17 +540,51 @@ sub generate_weights_for_a_gene {
     $W = abs($W);
     @w_mat_rows = ();
     my @dims = $W->dims();
-    # re-scale the weights to make them sum 1 on each category (columns)
+    # re-scale the weights to be between 0 and 1 (columns)
     for (my $i = 0; $i < $dims[0]; $i++) {
         next if ($W->($i,)->flat->sumover == 0);
-        $W->($i,) /= $W->($i,)->flat->sumover;
+        $W->($i,) = ($W->($i,) - $W->($i,)->min) / $W->($i,)->max;
     }
     # sum the weight for each snp
     $W = pdl map { $W->(,$_)->flat->sum; } 0 .. $dims[1] - 1;
     # make the weight for the gene sum 1.
-    $W += $W->(which($W > 0))->min;
+    if ($W->min == 0){ $W += $W->(which($W > 0))->min/$dims[0]; }
     $W /= $W->sum;
     return($W);
+}
+
+# usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
+sub build_index {
+    my $data_file  = shift;
+    my $index_file = shift;
+    my $offset     = 0;
+
+    while (<$data_file>) {
+        print $index_file pack("N", $offset);
+        $offset = tell($data_file);
+    }
+}
+
+# usage: line_with_index(*DATA_HANDLE, *INDEX_HANDLE, $LINE_NUMBER)
+# returns line or undef if LINE_NUMBER was out of range
+sub line_with_index {
+    my $data_file   = shift;
+    my $index_file  = shift;
+    my $line_number = shift;
+    
+    my $size;               # size of an index entry
+    my $i_offset;           # offset into the index of the entry
+    my $entry;              # index entry
+    my $d_offset;           # offset into the data file
+
+    $size = length(pack("N", 0));
+    $i_offset = $size * ($line_number - 1);
+    
+    seek($index_file, $i_offset, 0) or return;
+    read($index_file, $entry, $size);
+    $d_offset = unpack("N", $entry);
+    seek($data_file, $d_offset, 0);
+    return scalar(<$data_file>);
 }
 
 sub extract_binary_genotypes {
@@ -555,6 +621,7 @@ sub get_genotypes {
     } elsif ( $geno eq '10' ) { # -- missing genotype 0/0
       push @back, '0';
     } else { print_OUT("This genotype is not recognize [ $geno ]"); }    # genotype not recognize
+
   }
   return(\@back);
 }
@@ -631,6 +698,16 @@ sub gene_pvalue {
    $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
    # calculate the chi-square statistics for the Makambi method and its p-value
     if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]"); }
+    # Correct the weights by the LD in the gene.
+    # the new weight will be the weigthed mean of the gene.
+    # the weights for the mean are the correlation between the SNP, In that way the
+    # weights reflect the correlation pattern of the SNPs 
+    my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
+    my @dims = $w_matrix->dims();
+    $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
+    if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
+    $w_matrix /= $w_matrix->sum; # make sure weights sum 1
+    $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
    my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
@@ -640,7 +717,7 @@ sub gene_pvalue {
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
   # finally if requested calculate the gene-score for all samples
-  &sample_score($gene{$gn},\%assoc_data,$cor) if (defined $sample_score);
+  &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 }
 
 # this subroutine calcultes a gene-score for each sample
@@ -649,7 +726,39 @@ sub sample_score {
   my $gene = shift; # pseudohash with gene information
   my $assoc = shift; # ref to a hash
   my $cor_matrix = shift; # pdl matrix object
-  my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
+  my $snp_index = shift; # index of SNP in genptype file
+  my $geno_probs = shift; # file handel for file with genotype probabilities.
+  my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
+    # get snps info
+    my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
+    # counter to index the snps
+    my $snp_counter = 0;
+    # array to store the genotype probs of each sample
+    # each element in the array will a ref to an array which contains the prob for each snp for this sample
+    # WARNING: not very momeru efficient.
+    my @sample_geno_prob = ();
+    # go over each snps
+    if (defined $geno_probs){
+        foreach my $snp (@snp_info){
+            # use the index in teh bim or map file to find the line in the genotype prob file
+            # my index starts from 0 but the lines in the file from, 1 so add 1
+            my $desired_line = $snp_index->{$snp->{id}} + 1;
+            # get the line
+            my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
+            # split the information in the line
+            my @genos = split(/[\t+\s+]/,$line);
+            # now loop for all sample for this snps
+            my $sample_counter = 0;
+            for (my $g = 5; $g < scalar @genos; $g +=3){
+                # for each sample store the 3 genotype probs 
+                push @{ $sample_geno_prob[$sample_counter] }, [$genos[$g],$genos[$g+1],$genos[$g+2]];
+                $sample_counter++;
+            }
+            if (not defined $line){ print_OUT("Trying to fetch line out of range in sample score analysis. Line [ $desired_line ] was requested.") and exit(1); }
+            $snp_counter++;
+        }
+    }
+  
   # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
   # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
   my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
@@ -658,22 +767,28 @@ sub sample_score {
     my @genotypes = $gene->{genotypes}->($person,)->list;
     my @tmp_allele = ();
     my @tmp_or = ();
+    
     for (my $g = 0; $g < scalar @genotypes; $g++) {
-      # store counts of minor alleles
-      my $geno = $genotypes[$g];
-      if ($snp_info[$g]->{or} < 1){ # the minor allele is the protective allele
-	push @tmp_or, 1/$snp_info[$g]->{or};
-	if ($geno == 1) { push @tmp_allele, 0; }
-        if ($geno == 2) { push @tmp_allele, 1; }
-	if ($geno == 3) { push @tmp_allele, 2; }
-        if ($geno == 0) { push @tmp_allele, 0; }
-      } else { # the minor allele is the risk allele
-	push @tmp_or, $snp_info[$g]->{or};
-	if ($geno == 1) { push @tmp_allele, 2; }
-	if ($geno == 2) { push @tmp_allele, 1; }
-	if ($geno == 3) { push @tmp_allele, 0; }
-	if ($geno == 0) { push @tmp_allele, 0; }
-      }
+        # store counts of minor alleles
+        my $geno = $genotypes[$g];
+        # recover the genotype prob for this SNP on this sample.
+        # the final genotype will be the count of risk alleles multiply by its probability
+        my $g_prob = 1;
+        if (defined $geno_probs) { $g_prob = $sample_geno_prob[$person]->[$g]->[$geno - 1]; }
+        
+        if ($snp_info[$g]->{or} < 1){ # the minor allele is the protective allele
+            push @tmp_or, 1/$snp_info[$g]->{or};
+            if ($geno == 1) { push @tmp_allele, 0*$g_prob; }
+            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
+            if ($geno == 3) { push @tmp_allele, 2*$g_prob; }
+            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
+        } else { # the minor allele is the risk allele
+            push @tmp_or, $snp_info[$g]->{or};
+            if ($geno == 1) { push @tmp_allele, 2*$g_prob; }
+            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
+            if ($geno == 3) { push @tmp_allele, 0*$g_prob; }
+            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
+        }
     }
     # multiply the risk allele count by the odd ratio for that allele
     my $sample_w = pdl @tmp_allele;
@@ -1070,6 +1185,7 @@ script [options]
  	
         Sample Score Analysis:
         -sample_score		Generate sample level score (it requieres sample level genotypes).
+        -ox_gprobs              Genotype probabilities in OXFORD format.
         -covariates, -cov       File with covariates for the sample level analysis (TO BE IMPLEMENTED)
 
 
@@ -1087,7 +1203,7 @@ print complete documentation
 
 =item B<-report>
 
-how often to report advance. Provide an integer X and the program will report adnvance after X networks are analyzed.
+How often to report advance. Provide an integer X and the program will report adnvance after X genes are analyzed.
 
 =item B<-verbose, -v>
 
@@ -1103,7 +1219,7 @@ SNP info file in PLINK MAP format
 
 =item B<-bfile>
 
-Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam. 
+Files in PLINK binary format, with extension *.bed, *.bim and *.fam. 
 
 =item B<-out, -o>
 
@@ -1179,6 +1295,13 @@ Please note that SNPs without weights will internally get the weights set to zer
 =item B<-w_header>
 
 Indicate if the SNP weight file has a header.
+
+=item B<-ox_gprobs>
+
+File with genotype probabilities in OXFORD format. See http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html for details in the file format. An example is
+1	rs10489629	67400370 2 4 1 0 0 0 1 0 1 0 0
+Columns are chromosome, SNP id, SNP position, minor alelle (A), major alelle (B), prob for AA at sample1,  prob for AB at sample1,  prob for BB at sample1, prob for AA at sample2, etc.
+
 
 =back
 

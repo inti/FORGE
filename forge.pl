@@ -14,7 +14,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.95";
+my $VERSION = "0.9.5.1";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
@@ -537,19 +537,25 @@ sub generate_weights_for_a_gene {
     }
     # make a matrix with the weigths and get its dimensions
     my $W = pdl @w_mat_rows;
-    $W = abs($W);
-    @w_mat_rows = ();
-    my @dims = $W->dims();
-    # re-scale the weights to be between 0 and 1 (columns)
-    for (my $i = 0; $i < $dims[0]; $i++) {
-        next if ($W->($i,)->flat->sumover == 0);
-        $W->($i,) = ($W->($i,) - $W->($i,)->min) / $W->($i,)->max;
+    if (scalar @w_mat_rows == 1){
+        $W = ones 1;
+    } else {
+        $W = abs($W);
+        @w_mat_rows = ();
+        my @dims = $W->dims();
+        # re-scale the weights to be between 0 and 1 (columns)
+        for (my $i = 0; $i < $dims[0]; $i++) {
+            next if ($W->($i,)->flat->sumover == 0);
+            $W->($i,) = ($W->($i,) - $W->($i,)->min) / $W->($i,)->max;
+        }
+        # sum the weight for each snp
+        $W = pdl map { $W->(,$_)->flat->sum; } 0 .. $dims[1] - 1;
+        # make the weight for the gene sum 1.
+        if ($W->min == 0){
+            $W += $W->(which($W > 0))->min/$dims[0];
+        }
+        $W /= $W->sum;
     }
-    # sum the weight for each snp
-    $W = pdl map { $W->(,$_)->flat->sum; } 0 .. $dims[1] - 1;
-    # make the weight for the gene sum 1.
-    if ($W->min == 0){ $W += $W->(which($W > 0))->min/$dims[0]; }
-    $W /= $W->sum;
     return($W);
 }
 
@@ -635,7 +641,7 @@ sub gene_pvalue {
     # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
 	if ($n_snps == 1){
             if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
+            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
             delete($gene{$gn});
             return();
         }
@@ -715,7 +721,7 @@ sub gene_pvalue {
    # print out the results
    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
-   printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
+   printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
   # finally if requested calculate the gene-score for all samples
   &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 }

@@ -1,3 +1,6 @@
+v 0.9.5.1 
+- Minor bug in the SNP weight function that made the program crash when only 1 SNP was mapped to a gene.
+
 v 0.95
 - Changes to the weigthing method: a) for eacg category (columns in the weigths file) the values are scale to be between 0 and 1. Before they were re-scale to sum 1.
 b) weights are across categories are summed instead of multuplied c) weights are corrected by the LD. the idea behind this is that array SNPs are proxies so if two LD are

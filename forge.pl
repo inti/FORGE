@@ -14,7 +14,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.1";
+my $VERSION = "0.9.5.2";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
@@ -641,7 +641,7 @@ sub gene_pvalue {
     # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
 	if ($n_snps == 1){
             if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
+            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
             delete($gene{$gn});
             return();
         }

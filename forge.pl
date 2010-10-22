@@ -14,7 +14,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.2";
+my $VERSION = "0.9.5.3";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
@@ -829,7 +829,10 @@ sub get_makambi_chi_square_and_df {
   $w /= $w->sumover;
   my $pvalues = shift; # a pdl vector with the p-values to be combined
   # calculate the correlation matrix before the applying the weights
-  my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
+  # I have change this calculation following the results of the paper of Kost et al. this should improve the approximation of the test statistics
+  # Kost, J. T. & McDermott, M. P. Combining dependent p-values. Statistics & Probability Letters 2002; 60: 183-190.
+  # my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
+  my $COR_MAT = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3)); 
   my $second = $COR_MAT*$w*($w->transpose); # apply the weights 
   ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
   my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics

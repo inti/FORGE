@@ -14,7 +14,7 @@ use Data::Dumper;
 use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.3";
+my $VERSION = "0.9.5.4";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
@@ -55,7 +55,7 @@ pod2usage(0) if (defined $help);
 pod2usage(-exitstatus => 2, -verbose => 1) if (defined $man);
 pod2usage(0) if (not defined $assoc);
 open (LOG,">$out.log") or print_OUT("I can not open [ $out.log ] to write to") and exit(1);
-print_OUT("FORGE version [ $VERSION ]");
+print_OUT("FORGE version [ $VERSION ]. See http://github.com/inti for updates\n");
 print_OUT("LOG file will be written to [ $out.log ]");
 
 # define distance threshold,
@@ -107,7 +107,7 @@ print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){
   $all_genes = 1;
-  print_OUT("WARNING: You did not provide an option for the set of genes to be analyzed. I will analyze all genes covered by the SNP association file. Check documentation for options -genes and -gene_list otherwise");
+  print_OUT("Note: You did not provide an option for the set of genes to be analyzed. I will analyze all genes covered by the SNP association file. Check documentation for options -genes and -gene_list otherwise");
 }
 
 if ( not defined $all_genes ) { # in case user want to analyze all genes
@@ -664,11 +664,11 @@ sub gene_pvalue {
 	 if (defined $v){ print_OUT("working in $i:$gene{$gn}->{geno_mat_rows}->[$i]; $p:$gene{$gn}->{geno_mat_rows}->[$p]"); }
 	  # if is it a self correlation then don't calculate anything
 	 if ($gene{$gn}->{geno_mat_rows}->[$p] eq  $gene{$gn}->{geno_mat_rows}->[$i]){
-			set $cor, $i, $p, 1;
+	    set $cor, $i, $p, 1;
             set $cor, $p, $i, 1;
-	        $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = 1;
-			$correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = 1;
-			next;
+	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = 1;
+	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = 1;
+	    next;
 	 }
 	 # if the correlation is stored in the %correlation hash then fetch the value
 	 if (exists $correlation{ $gene{$gn}->{geno_mat_rows}->[$p] }{ $gene{$gn}->{geno_mat_rows}->[$i] } ){
@@ -679,14 +679,19 @@ sub gene_pvalue {
 		# if the user did not provided a genotype file and tell that this pair of SNPs does not have a correlation value
 		unless ((defined $bfile) or (defined $ped)){print_OUT(" WARNING: this pair of snps does not have a correlation value: [$gn => $gene{$gn}->{snps}->[$p] ] and [ $gene{$gn}->{snps}->[$i] ]"); }
 		# compute the correlation
-		my $c = "";
-		if (defined $pearson_genotypes) { # if requested used the Pearson correlation for genotypes
-		  $c = pearson_corr_genotypes([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		} else { # by default use the spearman rank correlation
-		  my $d = Statistics::RankCorrelation->new([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		  $c = $d->spearman;
-		}
-		set $cor, $i,$p, $c;
+		#my $c = "";
+		#if (defined $pearson_genotypes) { # if requested used the Pearson correlation for genotypes
+		#  $c = pearson_corr_genotypes([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
+		#} else { # by default use the spearman rank correlation
+		  #my $d = Statistics::RankCorrelation->new([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
+		  #$c = $d->spearman;
+                  my $a = $gene{$gn}->{genotypes}->(,$i);
+                  $a->inplace->setvaltobad( 0 );
+                  my $b = $gene{$gn}->{genotypes}->(,$p);
+                  $b->inplace->setvaltobad( 0 );
+                  my ($c) = $a->corr($b)->list;
+ 		#}
+ 		set $cor, $i,$p, $c;
 		set $cor, $p,$i, $c;
 		# increase the second term of the Makambi method
 		# store the correlation value in case is needed later.

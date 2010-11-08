@@ -11,10 +11,9 @@ use IO::File;
 use IO::Seekable;
 use Fcntl;
 use Data::Dumper;
-use Statistics::RankCorrelation;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.4";
+my $VERSION = "0.9.5.5";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
@@ -55,7 +54,7 @@ pod2usage(0) if (defined $help);
 pod2usage(-exitstatus => 2, -verbose => 1) if (defined $man);
 pod2usage(0) if (not defined $assoc);
 open (LOG,">$out.log") or print_OUT("I can not open [ $out.log ] to write to") and exit(1);
-print_OUT("FORGE version [ $VERSION ]. See http://github.com/inti for updates\n");
+print_OUT("FORGE version [ $VERSION ]. See http://github.com/inti for updates");
 print_OUT("LOG file will be written to [ $out.log ]");
 
 # define distance threshold,
@@ -352,31 +351,24 @@ if (defined $spearman){
 print_OUT("Output file will be written to [ $out ]");
 
 # if printing sample level scores.
-my $out_fh_sample_score = new IO::File if (defined $sample_score);
+my $out_fh_sample_score_mat = new IO::File if (defined $sample_score);
+my $out_fh_sample_score_dat = new IO::File if (defined $sample_score);
 
 if (defined $sample_score){
-  print_OUT("   '-> Sample scores printed to [ $out.sample_score ]");
-  $out_fh_sample_score->open(">$out.sample_score");
-  my $iid = "";
-  my $fid = "";
-  my $pid = "";
-  my $mid = "";
-  my $sex = "";
-  my $pheno = "";
+  print_OUT("   '-> Sample Scores: Gene scores printed to [ $out.sample_score.mat ]");
+  $out_fh_sample_score_mat->open(">$out.sample_score.mat");
+  print_OUT("   '-> Sample Scores: Samples data printed to [ $out.sample_score.dat ]");
+  $out_fh_sample_score_dat->open(">$out.sample_score.dat");
+  print $out_fh_sample_score_dat "IID FID PID MID SEX TRAIT\n";
   for (my $i = 0; $i < scalar @fam; $i++){
-    $iid .= " $fam[$i]->{iid}";
-    $fid .= " $fam[$i]->{fid}";
-    $pid .= " $fam[$i]->{pid}";
-    $mid .= " $fam[$i]->{mid}";
-    $sex .= " $fam[$i]->{sex}";
-    $pheno .= " $fam[$i]->{pheno}";
+    print $out_fh_sample_score_dat  $fam[$i]->{iid}," ",
+                                    $fam[$i]->{fid}," ",
+                                    $fam[$i]->{pid}," ",
+                                    $fam[$i]->{mid}," ",
+                                    $fam[$i]->{sex}," ",
+                                    $fam[$i]->{pheno},"\n";
   }
-  print $out_fh_sample_score "IID IID$iid\n";
-  print $out_fh_sample_score "FID FID$fid\n";
-  print $out_fh_sample_score "PID PID$pid\n";
-  print $out_fh_sample_score "MID MID$mid\n";
-  print $out_fh_sample_score "SEX SEX$sex\n";
-  print $out_fh_sample_score "TRAIT BD$pheno\n";
+  $out_fh_sample_score_dat->close();
 }
 
 # create a variable that will store a ref to a hash with the weights
@@ -506,9 +498,7 @@ if (defined $bfile) {
   print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness");
 }
  
-
-# loop over all genes and calculate the gene p-values
-$out_fh_sample_score->close() if (defined $sample_score);
+$out_fh_sample_score_mat->close() if (defined $sample_score);
 # if the user want to get the correlation values print the *.correlation file
 if (defined $print_cor){
   open (COR,">$out.correlation") or print_OUT("Cannot open [ $out.correlation ] to write to") and exit(1);
@@ -685,9 +675,9 @@ sub gene_pvalue {
 		#} else { # by default use the spearman rank correlation
 		  #my $d = Statistics::RankCorrelation->new([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
 		  #$c = $d->spearman;
-                  my $a = $gene{$gn}->{genotypes}->(,$i);
+                  my $a = $gene{$gn}->{genotypes}->(,$i)->flat->copy;
                   $a->inplace->setvaltobad( 0 );
-                  my $b = $gene{$gn}->{genotypes}->(,$p);
+                  my $b = $gene{$gn}->{genotypes}->(,$p)->flat->copy;
                   $b->inplace->setvaltobad( 0 );
                   my ($c) = $a->corr($b)->list;
  		#}
@@ -746,7 +736,7 @@ sub sample_score {
     my $snp_counter = 0;
     # array to store the genotype probs of each sample
     # each element in the array will a ref to an array which contains the prob for each snp for this sample
-    # WARNING: not very momeru efficient.
+    # WARNING: not very momery efficient.
     my @sample_geno_prob = ();
     # go over each snps
     if (defined $geno_probs){
@@ -803,7 +793,8 @@ sub sample_score {
     }
     # multiply the risk allele count by the odd ratio for that allele
     my $sample_w = pdl @tmp_allele;
-    $sample_w *= pdl @tmp_or;
+    my $sample_or= pdl @tmp_or;
+    $sample_w *= ($sample_or->log + 1);
     # make sure not weigth is equal to 0
     $sample_w += $sample_w->(which($sample_w > 0))->min;
     # make sure they add one
@@ -820,7 +811,7 @@ sub sample_score {
   ## TODO ##
   # implement the association between the sample score and the phenotype.
   # use a regression with the adecuate covariates. the -covariate option must be implemented for this
-  print $out_fh_sample_score "$out_line\n";
+  print $out_fh_sample_score_mat "$out_line\n";
 }
 
 # this subroutine applies the makambi method to combine p-values from correlated test

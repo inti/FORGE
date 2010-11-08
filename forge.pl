@@ -13,7 +13,7 @@ use Fcntl;
 use Data::Dumper;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.5";
+my $VERSION = "0.9.5.6";
 
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,

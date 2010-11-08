@@ -724,12 +724,12 @@ sub gene_pvalue {
 # this subroutine calcultes a gene-score for each sample
 # inputs are the gene pseudo-hash, the association p-values and the correlation matrix
 sub sample_score {
-  my $gene = shift; # pseudohash with gene information
-  my $assoc = shift; # ref to a hash
-  my $cor_matrix = shift; # pdl matrix object
-  my $snp_index = shift; # index of SNP in genptype file
-  my $geno_probs = shift; # file handel for file with genotype probabilities.
-  my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
+    my $gene = shift; # pseudohash with gene information
+    my $assoc = shift; # ref to a hash
+    my $cor_matrix = shift; # pdl matrix object
+    my $snp_index = shift; # index of SNP in genptype file
+    my $geno_probs = shift; # file handel for file with genotype probabilities.
+    my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
     # get snps info
     my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
     # counter to index the snps
@@ -759,59 +759,72 @@ sub sample_score {
             $snp_counter++;
         }
     }
-  
-  # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
-  # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
-  my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
-  my $out_line = "$gene->{ensembl} $gene->{hugo}";
-  for (my $person = 0; $person < $n_samples; $person++){
-    my @genotypes = $gene->{genotypes}->($person,)->list;
-    my @tmp_allele = ();
-    my @tmp_or = ();
     
-    for (my $g = 0; $g < scalar @genotypes; $g++) {
-        # store counts of minor alleles
-        my $geno = $genotypes[$g];
-        # recover the genotype prob for this SNP on this sample.
-        # the final genotype will be the count of risk alleles multiply by its probability
-        my $g_prob = 1;
-        if (defined $geno_probs) { $g_prob = $sample_geno_prob[$person]->[$g]->[$geno - 1]; }
-        
-        if ($snp_info[$g]->{or} < 1){ # the minor allele is the protective allele
-            push @tmp_or, 1/$snp_info[$g]->{or};
-            if ($geno == 1) { push @tmp_allele, 0*$g_prob; }
-            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
-            if ($geno == 3) { push @tmp_allele, 2*$g_prob; }
-            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
-        } else { # the minor allele is the risk allele
-            push @tmp_or, $snp_info[$g]->{or};
-            if ($geno == 1) { push @tmp_allele, 2*$g_prob; }
-            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
-            if ($geno == 3) { push @tmp_allele, 0*$g_prob; }
-            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
+    # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
+    # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
+    my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
+    my $index = 0;
+    my $geno_mat = double  $gene->{genotypes}->copy;
+    # recode the genotypes
+    if (defined $v ){ print "Genotypes raw\n" . $geno_mat->(0:5,),"\n"; }
+    my $sample_or = [];
+    foreach my $snp_info (@snp_info){
+        if ($snp_info->{or} < 1){
+            # 1 -> 0
+            # 2 -> 1
+            # 3 -> 2
+            # 0 -> 0
+            push @{$sample_or}, 1/$snp_info->{or};
+            $geno_mat->( which($geno_mat->(,$index) > 0), $index) -= 1;
+        } else {
+            # 1 -> 2
+            # 2 -> 1
+            # 3 -> 0
+            # 0 -> 0
+            push @{ $sample_or }, $snp_info->{or};
+            $geno_mat->( which($geno_mat->(,$index) == 1), $index) += 1;
+            $geno_mat->( which($geno_mat->(,$index) == 2), $index) -= 1;
+            $geno_mat->( which($geno_mat->(,$index) == 3), $index) *= 0;
+        }
+        $index++;
+    }
+    $sample_or= pdl @{$sample_or};
+    
+    if (defined $v ){ print "Genotypes recoded\n",$geno_mat->(0:5,),"\n"; }
+    if (defined $geno_probs){
+        my $geno_prob_mat = [];
+        for (my $i = 0; $i < $n_samples; $i++){    
+            foreach (my $j = 0; $j < $n_snps; $j++ ){
+                push @{ $geno_prob_mat->[$j] }, $sample_geno_prob[$i]->[$j]->[$geno_mat->($i,$j)->sclr];
+            }
+        }
+        $geno_prob_mat = double pdl $geno_prob_mat;
+        $geno_mat *= $geno_prob_mat;
+        if (defined $v ){
+            print "Geno prob\n",$geno_prob_mat->(0:5,),"\n";
+            print "Genotypes * geno prob\n", $geno_mat->(0:5,),"\n";
         }
     }
-    # multiply the risk allele count by the odd ratio for that allele
-    my $sample_w = pdl @tmp_allele;
-    my $sample_or= pdl @tmp_or;
-    $sample_w *= ($sample_or->log + 1);
-    # make sure not weigth is equal to 0
-    $sample_w += $sample_w->(which($sample_w > 0))->min;
-    # make sure they add one
-    $sample_w /= $sample_w->sumover;
-    # multiply by the SNP weigths
-    $sample_w *= $gene->{weights};
-    $sample_w /= $sample_w->sumover;
-    # calculate the FORGE statistics using the sample weights
-    my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
-    # get the p-value
-    my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
-    $out_line .= " $sample_score_p_value";
-  }
-  ## TODO ##
-  # implement the association between the sample score and the phenotype.
-  # use a regression with the adecuate covariates. the -covariate option must be implemented for this
-  print $out_fh_sample_score_mat "$out_line\n";
+    if (defined $v ){ print $gene->{weights},"\n"; }
+    $geno_mat *= $gene->{weights}->transpose;
+
+    if (defined $v ){
+        print "new dims: ", join " ", $geno_mat->dims,"\n";
+        print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
+    }
+    $geno_mat *= ($sample_or->log->transpose + 1);
+    if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
+    
+    my $out_line = "$gene->{ensembl} $gene->{hugo}";  
+    foreach (my $i = 0; $i < $n_samples; $i++){
+        my $sample_w = $geno_mat->($i,)->flat;
+        $sample_w += $sample_w->(which($sample_w > 0))->min;
+        my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
+        # get the p-value
+        my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
+        $out_line .= " $sample_score_p_value";
+    }
+    print $out_fh_sample_score_mat "$out_line\n";
 }
 
 # this subroutine applies the makambi method to combine p-values from correlated test

@@ -180,15 +180,42 @@ while (  my $a = <ASSOC> ) {
   my $A2 = "NA";
   my $A1 = "NA";
   my $OR = 1;
+  my $BETA = undef;
+  my $R2 = undef;
+  my $STAT = undef;
   if (exists $header{"A2"}){ $A2 = $data[$header{"A2"}];}
   if (exists $header{"A1"}){ $A1 = $data[$header{"A1"}];}
   if (exists $header{"OR"}){ $OR = $data[$header{"OR"}];}
-   $assoc_data{ $data[$header{"SNP"}] } = {
+  if (exists $header{"BETA"}){ $BETA = $data[$header{"BETA"}];}
+  if (exists $header{"R2"}){ $R2 = $data[$header{"R2"}];}
+  if (exists $header{"STAT"}){ $STAT = $data[$header{"STAT"}];}
+  my $effect = undef;
+  if (exists $header{"OR"}){
+    $effect = "or";
+  } elsif (exists $header{"BETA"}){
+        $effect = "beta";
+  } elsif (exists $header{"STAT"}){
+        $effect = "stat";
+  }
+  # do some checking
+  if (defined $sample_score){
+    # if there are not direction of effect defined quite analysis and spit and error.
+    if (not defined $effect){
+        print_OUT("ERROR: No effect size measure or direction of effect provided. I can not perform Sample Score analysis");
+        print_OUT("ERROR: Please provide an odd-ratio, beta or regression coefficient value under the header OR, BETA or STAT, respectively");
+        exit(1);
+    } 
+  }
+  $assoc_data{ $data[$header{"SNP"}] } = {
                 				'pvalue' => 1 ,
 						'id' => $data[$header{"SNP"}],
-						'or' => $OR,
 						'a1' => $A1,
 						'a2' => $A2,
+						'or' => $OR,
+                                                'beta' => $BETA,
+                                                'stat' => $STAT,
+                                                'r2' => $R2,
+                                                'effect_size_measure' => $effect,
         				};
    
    if ($lambda == 1) {
@@ -727,7 +754,7 @@ sub sample_score {
     my $gene = shift; # pseudohash with gene information
     my $assoc = shift; # ref to a hash
     my $cor_matrix = shift; # pdl matrix object
-    my $snp_index = shift; # index of SNP in genptype file
+    my $snp_index = shift; # index of SNPs in genptype file
     my $geno_probs = shift; # file handel for file with genotype probabilities.
     my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
     # get snps info
@@ -736,7 +763,6 @@ sub sample_score {
     my $snp_counter = 0;
     # array to store the genotype probs of each sample
     # each element in the array will a ref to an array which contains the prob for each snp for this sample
-    # WARNING: not very momery efficient.
     my @sample_geno_prob = ();
     # go over each snps
     if (defined $geno_probs){
@@ -767,28 +793,44 @@ sub sample_score {
     my $geno_mat = double  $gene->{genotypes}->copy;
     # recode the genotypes
     if (defined $v ){ print "Genotypes raw\n" . $geno_mat->(0:5,),"\n"; }
-    my $sample_or = [];
+    my $snps_effect_size = [];
+    my $direction_of_effect = undef;
+    my $effect_size_in_use = undef;
     foreach my $snp_info (@snp_info){
-        if ($snp_info->{or} < 1){
+        if (not defined $direction_of_effect){
+            $effect_size_in_use = $snp_info->{effect_size_measure};
+            if ($effect_size_in_use eq 'or'){
+                $direction_of_effect = "$snp_info->{ or } < 1";
+            } elsif ($effect_size_in_use eq 'beta'){
+                $direction_of_effect = "$snp_info->{ beta } < 0";
+            } elsif ($effect_size_in_use eq 'stat'){
+                $direction_of_effect = "$snp_info->{ stat } < 0";
+            }
+        }
+        if ($direction_of_effect){
             # 1 -> 0
             # 2 -> 1
             # 3 -> 2
             # 0 -> 0
-            push @{$sample_or}, 1/$snp_info->{or};
+            if ($effect_size_in_use eq 'or'){
+                push @{$snps_effect_size}, log( 1/$snp_info->{ $snp_info->{effect_size_measure} } );
+            } else {
+                push @{$snps_effect_size}, -1 * $snp_info->{ $snp_info->{effect_size_measure} } ;
+            }
             $geno_mat->( which($geno_mat->(,$index) > 0), $index) -= 1;
         } else {
             # 1 -> 2
             # 2 -> 1
             # 3 -> 0
             # 0 -> 0
-            push @{ $sample_or }, $snp_info->{or};
+            push @{ $snps_effect_size }, $snp_info->{$snp_info->{effect_size_measure}};
             $geno_mat->( which($geno_mat->(,$index) == 1), $index) += 1;
             $geno_mat->( which($geno_mat->(,$index) == 2), $index) -= 1;
             $geno_mat->( which($geno_mat->(,$index) == 3), $index) *= 0;
         }
         $index++;
     }
-    $sample_or= pdl @{$sample_or};
+    $snps_effect_size= pdl @{$snps_effect_size};
     
     if (defined $v ){ print "Genotypes recoded\n",$geno_mat->(0:5,),"\n"; }
     if (defined $geno_probs){
@@ -812,7 +854,7 @@ sub sample_score {
         print "new dims: ", join " ", $geno_mat->dims,"\n";
         print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
     }
-    $geno_mat *= ($sample_or->log->transpose + 1);
+    $geno_mat *= $snps_effect_size;
     if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
     
     my $out_line = "$gene->{ensembl} $gene->{hugo}";  

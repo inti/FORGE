@@ -30,8 +30,6 @@ if (header == "T"){
 }
 # recalculate the FORGE p-values. This because usually does not work on double precission
 data[,9]<-pchisq(data[,10],df= data[,11],lower.tail=F); 
-# recalculate the Galwey p-values
-data[,12]<-pchisq(data[,13],df=2* data[,14],lower.tail=F); 
 # re-order that data
 data<-data[order(data[,9]),]
 data$new_sidak<-apply(data,1, function(x) { if (as.numeric(x[8]) == "0") { return(x[7])} else { return(x[8]) }; if (x[8]==1){return(0.999999999999)} else {return(x[8])} })
@@ -47,10 +45,5 @@ data[which(data[,9] != "NA"),"FORGE_locfdr"]<-data_fisher_fdr$fdr
 data_sidak<-data[which(data[,8] != "NA"),"new_sidak"]
 data_sidak_fdr<-locfdr(qnorm(as.numeric(data_sidak),lower.tail=F),plot=0)
 data$sidak_locfdr<-data_sidak_fdr$fdr
-
-data[which(data[,12]==1),12]<-0.999999999999
-data_galwey<-data[which(data[,12] != "NA"),12]
-data_galwey_fdr<-locfdr(qnorm(as.numeric(data_galwey),lower.tail=F),plot=0)
-data[which(data[,12] != "NA"),"galwey_locfdr"]<-data_galwey_fdr$fdr
 
 write.table(data,file=fileout, quote=F, row.names=F,col.names=T,sep = "\t")

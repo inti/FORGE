@@ -854,7 +854,7 @@ sub sample_score {
         print "new dims: ", join " ", $geno_mat->dims,"\n";
         print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
     }
-    $geno_mat *= $snps_effect_size;
+    $geno_mat *= $snps_effect_size->transpose;
     if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
     
     my $out_line = "$gene->{ensembl} $gene->{hugo}";  

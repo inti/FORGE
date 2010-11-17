@@ -55,7 +55,7 @@ if (cov == "F") {
     rand_phe<-sample(phenotype)
     perm_p<-sapply(1:length(assoc), function(x)
                    {
-                    if(round(x / 5) - (x / 5) == 0){
+                    if(round(x / 25) - (x / 25) == 0){
                       cat("   '-> Done with [",x,"] Genes\n",sep=" ")
                     }
                     coeff<-as.data.frame(assoc[[x]])

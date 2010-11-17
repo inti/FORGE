@@ -20,7 +20,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
-    $ped, $map, $ox_gprobs,
+    $ped, $map, $ox_gprobs,$sample_score_self,
 );
 
 GetOptions(
@@ -45,6 +45,7 @@ GetOptions(
    'pearson_genotypes' => \$pearson_genotypes,
    'distance|d=i' => \$distance, 
    'sample_score' => \$sample_score,
+   'score_self' => \$sample_score_self,
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
@@ -854,7 +855,9 @@ sub sample_score {
         print "new dims: ", join " ", $geno_mat->dims,"\n";
         print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
     }
-    $geno_mat *= $snps_effect_size->transpose;
+    unless (defined $sample_score_self){
+    	$geno_mat *= $snps_effect_size->transpose; 
+    }
     if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
     
     my $out_line = "$gene->{ensembl} $gene->{hugo}";  
@@ -863,7 +866,7 @@ sub sample_score {
         $sample_w += $sample_w->(which($sample_w > 0))->min;
         my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
         # get the p-value
-        my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
+        my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df);
         $out_line .= " $sample_score_p_value";
     }
     print $out_fh_sample_score_mat "$out_line\n";
@@ -882,12 +885,14 @@ sub get_makambi_chi_square_and_df {
   # calculate the correlation matrix before the applying the weights
   # I have change this calculation following the results of the paper of Kost et al. this should improve the approximation of the test statistics
   # Kost, J. T. & McDermott, M. P. Combining dependent p-values. Statistics & Probability Letters 2002; 60: 183-190.
-  # my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
-  my $COR_MAT = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3)); 
+  # my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2)); # OLD
+  my $COR_MAT = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3)); # NEW 
   my $second = $COR_MAT*$w*($w->transpose); # apply the weights 
   ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
   my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics
   my $df = 8/$varMf_m; # the degrees of freedom of the test statistic
+#  if (defined $sample_score_self){ $df *= 2;}
+   
   my $chi_stat = sumover(-2 * $pvalues->log * $w); # and the chi-square for the combine probability
   $chi_stat = ( $chi_stat/2 ) * $df;
   return ($chi_stat,$df);

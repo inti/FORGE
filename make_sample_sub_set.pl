@@ -34,6 +34,8 @@ open (FAM,$fam) or die $!;
 while (my $line = <FAM>){
     chomp($line);
     my @data = split(/\s+/,$line);
+    next if ($data[5] eq 'NA');
+    next if ($data[5] == -9);
     if ( $data[5] == 1){ push @controls, "$data[0] $data[1]"; }
     elsif ( $data[5] == 2){ push @cases, "$data[0] $data[1]"; }
     else { push @controls, $data[0]; }

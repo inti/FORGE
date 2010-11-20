@@ -62,4 +62,3 @@ perl $FORGE_PATH -bfile $TMP_DIR/$1.target.chr$CHR \
 mv $TMP_DIR/$1.trainning.chr$CHR.* $FINAL_DIR
 mv $TMP_DIR/$1.target.chr$CHR.* $FINAL_DIR
 #mv $TMP_DIR/$OUT_TAG.* $FINAL_DIR
-

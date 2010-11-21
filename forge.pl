@@ -20,7 +20,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
-    $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
+    $ped, $map, $ox_gprobs,$sample_score_self,
 );
 
 GetOptions(
@@ -49,7 +49,6 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
-   'w_maf' => \$w_maf,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -853,19 +852,6 @@ sub sample_score {
     if (defined $v ){ print $gene->{weights},"\n"; }
     $geno_mat *= $gene->{weights}->transpose;
     
-    # EXPERIMENTAL: weigthing by the 1/MAF
-    if (defined $w_maf){
-	my $MAF_w = [];
-	for my $i (0 .. $n_snps - 1) {
-	    my $tmp_maf = $geno_mat->(,$i)->flat->sum/$geno_mat->nelem;
-	    $tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
-	    push @{$MAF_w}, $tmp_maf;
-	}
-	$MAF_w = pdl $MAF_w;
-	$MAF_w = 1/$MAF_w;
-	$geno_mat *= $MAF_w->transpose;
-    }
-    # EXPERIMENTAL: weigthing by the 1/MAF
     
     if (defined $v ){
         print "new dims: ", join " ", $geno_mat->dims,"\n";

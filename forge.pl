@@ -49,7 +49,7 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
-   'w_maf' => \$w_maf,
+   'weight_by_maf|w_maf' => \$w_maf,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -731,7 +731,21 @@ sub gene_pvalue {
     # Correct the weights by the LD in the gene.
     # the new weight will be the weigthed mean of the gene.
     # the weights for the mean are the correlation between the SNP, In that way the
-    # weights reflect the correlation pattern of the SNPs 
+    # weights reflect the correlation pattern of the SNPs
+
+    # if desired weigth by the 1/MAF
+    if (defined $w_maf){
+	my $MAF_w = [];
+	for my $i (0 .. $n_snps - 1) {
+	    my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->nelem;
+	    $tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
+	    push @{$MAF_w}, $tmp_maf;
+	}
+	$MAF_w = pdl $MAF_w;
+	$MAF_w = 1/$MAF_w;
+	$gene{$gn}->{weights} *= $MAF_w->transpose;
+    }
+
     my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
     my @dims = $w_matrix->dims();
     $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
@@ -853,19 +867,6 @@ sub sample_score {
     if (defined $v ){ print $gene->{weights},"\n"; }
     $geno_mat *= $gene->{weights}->transpose;
     
-    # EXPERIMENTAL: weigthing by the 1/MAF
-    if (defined $w_maf){
-	my $MAF_w = [];
-	for my $i (0 .. $n_snps - 1) {
-	    my $tmp_maf = $geno_mat->(,$i)->flat->sum/$geno_mat->nelem;
-	    $tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
-	    push @{$MAF_w}, $tmp_maf;
-	}
-	$MAF_w = pdl $MAF_w;
-	$MAF_w = 1/$MAF_w;
-	$geno_mat *= $MAF_w->transpose;
-    }
-    # EXPERIMENTAL: weigthing by the 1/MAF
     
     if (defined $v ){
         print "new dims: ", join " ", $geno_mat->dims,"\n";
@@ -1263,6 +1264,7 @@ script [options]
  	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
         -weights, -w            File with SNP weights
         -w_header               Indicate if the SNP weight file has a header.
+        -weight_by_maf, -w_maf  Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
  	
         Sample Score Analysis:
         -sample_score		Generate sample level score (it requieres sample level genotypes).
@@ -1376,6 +1378,10 @@ Please note that SNPs without weights will internally get the weights set to zer
 =item B<-w_header>
 
 Indicate if the SNP weight file has a header.
+
+=item B<-weight_by_maf, -w_maf>
+
+Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
 
 =item B<-ox_gprobs>
 

@@ -726,12 +726,12 @@ sub gene_pvalue {
 
    # get the log of the SNP p-value
    $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
-   # calculate the chi-square statistics for the Makambi method and its p-value
+
+    #
+    #### WORK ON THE GENE WEIGHTS ####
+    #
+
     if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]"); }
-    # Correct the weights by the LD in the gene.
-    # the new weight will be the weigthed mean of the gene.
-    # the weights for the mean are the correlation between the SNP, In that way the
-    # weights reflect the correlation pattern of the SNPs
 
     # if desired weigth by the 1/MAF
     if (defined $w_maf){
@@ -746,22 +746,27 @@ sub gene_pvalue {
 	$gene{$gn}->{weights} *= $MAF_w->transpose;
     }
 
+    # Correct the weights by the LD in the gene.
+    # the new weight will be the weigthed mean of the gene weights.
+    # the weights for the mean are the correlation between the SNP, In that way the
+    # weights reflect the correlation pattern of the SNPs
+
     my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
     my @dims = $w_matrix->dims();
     $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
     if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
     $w_matrix /= $w_matrix->sum; # make sure weights sum 1
     $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
-   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
+    my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
-   my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
+    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
-   # print out the results
-   my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
-   if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
-   printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
-  # finally if requested calculate the gene-score for all samples
-  &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+    # print out the results
+    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
+    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
+    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
+    # finally if requested calculate the gene-score for all samples
+    &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 }
 
 # this subroutine calcultes a gene-score for each sample

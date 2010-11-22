@@ -29,11 +29,20 @@ for (e in commandArgs()) {
 cat("Reading samples and phenotypes from [",fam,"]\n",sep=" ")
 dat<-read.table(fam,header=T)
 cat("Reading gene scores from [",scores,"]\n",sep=" ")
-sc<-read.table(scores,row.names=1)
+sc<-read.table(scores,row.names=1) # genes in the rows
+cat("   '-> [",ncol(sc),"] genes read\n",sep=" ")
+m<-as.matrix(sc[,2:ncol(sc)]) # genes in the row
+m_var<-apply(m,1, function(x) (max(x) - min(x)))
+m2<-m[which( m_var != 0),]
+n_cols_removed<-abs(nrow(m) - nrow(m2))
+sc<-m2
+cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
 
+cat("Making have mean 0 and sd 1\n",sep=" ")
+sc<-apply(sc,1,function(row) (row - mean(row))/sd(row) ) # gene back in columns
+sc<-t(sc) # genes in rows
 N<-nrow(sc)
 cat(N,"Genes to be analysed\n",sep=" ")
-cat("Running GLM model for genes\n",sep=" ")
 phenotype<-0
 dat[dat==-9]<-NA
 if (qt == "F"){
@@ -47,8 +56,9 @@ if (qt == "T"){
 }
 expected_coeff<-1
 perm_p<-"F"
+cat("Running GLM model for genes\n",sep=" ")
 if (cov == "F") {
-  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)} } )
+  assoc<-apply(sc,1, function(row) { list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)}  )
   
   if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")
@@ -67,7 +77,7 @@ if (cov == "F") {
                      counter<-0;
                      seen<-0;
                      for(counter in 1:perm){
-                      perm_coeff<-summary(glm(rand_phe ~ as.numeric(sc[x,2:ncol(sc)]),family=test_family))$coeff
+                      perm_coeff<-summary(glm(rand_phe ~ as.numeric(sc[x,]),family=test_family))$coeff
                       if (perm_coeff[2,4] <= observed){
                         counter<-counter+1
                         seen<-seen+1
@@ -90,7 +100,7 @@ if (cov == "F") {
   cov2<-read.table(cov)
   cov2<-as.matrix(cov2[,3:ncol(cov2)])
   cov2[cov2==-9]<-NA
-  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row + cov2,family=test_family))$coeff)} } )
+  assoc<-apply(sc,1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row + cov2,family=test_family))$coeff)} } )
   expected_coeff<-ncol(cov2) + 1
     if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")
@@ -109,7 +119,7 @@ if (cov == "F") {
                      counter<-0;
                      seen<-0;
                      for(counter in 1:perm){
-                      perm_coeff<-summary(glm(rand_phe ~ as.numeric(sc[x,2:ncol(sc)]) + cov2,family=test_family))$coeff
+                      perm_coeff<-summary(glm(rand_phe ~ as.numeric(sc[x,]) + cov2,family=test_family))$coeff
                       if (perm_coeff[2,4] <= observed){
                         counter<-counter+1
                         seen<-seen+1
@@ -133,7 +143,7 @@ assoc<-t(assoc)
 colnames(assoc)<-c("estimate","std_error","pvalue")
 assoc<-as.data.frame(assoc)
 assoc$empi_p<-perm_p
-assoc$gene_symbol<-as.vector(sc[,"V2"])
+#assoc$gene_symbol<-as.vector(sc[,"V2"])
 cat("Writting to file [",out,"]\n",sep=" ")
 write.table(assoc,file=out,col.names=T,row.names=T,sep="\t",quote=F)
 cat("Done with analysis\n",sep=" ")

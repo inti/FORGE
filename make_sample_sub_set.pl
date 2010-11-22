@@ -7,7 +7,7 @@ use Data::Dumper;
 my $VERSION = "0.1";
 
 
-our ( $help, $man, $out, $fam,$size,$N, $qt );
+our ( $help, $man, $out, $fam,$size,$N, $qt,$cv );
 
 GetOptions(
     'help|h' => \$help,
@@ -18,6 +18,7 @@ GetOptions(
     'n_subsets|n=i' => \$N, 
     'subset_size|size=f' => \$size,
     'qt' => \$qt,
+    'cross_validation|cv=i' => \$cv,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -42,19 +43,55 @@ while (my $line = <FAM>){
 }
 close(FAM);
 
-
 print scalar localtime, "\tThere are [ " . scalar @cases . " ] and [ " . scalar @controls . "] controls\n";
-print scalar localtime, "\tWill make [ $N ] subsets of [ " . int(scalar @cases*$size) . " ] cases and [ " . int(scalar @controls*$size) . " ] controls\n";
-print scalar localtime, "\tResults will be written to [ $out.subsetNumber ]\n";
+if (defined $cv){
+	print scalar localtime, "\tWill make [ $cv ] no-overapping subsets of approx [ " . int(scalar @cases/$cv) . " ] cases and [ " . int(scalar 	@controls/$cv) . " ] controls\n";
+	print scalar localtime, "\tAnd will output [ $cv ] sets made by leaving out one of the no-overapping subsets\n"; 
+} else { 
+	print scalar localtime, "\tWill make [ $N ] subsets of [ " . int(scalar @cases*$size) . " ] cases and [ " . int(scalar 	@controls*$size) . " ] controls\n";
+	print scalar localtime, "\tResults will be written to [ $out.subsetNumber ]\n";
+}
 
-my @new_sets = ();
-for my $i (1 .. $N){
-    my @case_index  = @{get_rand_index(scalar @cases,int(scalar @cases*$size))}; 
-    my @control_index  = @{get_rand_index(scalar @controls,int(scalar @controls*$size))}; 
-    push @{$new_sets[$i-1]}, (@cases[@case_index], @controls[@control_index]);
-    open (OUT,">$out.$i") or die $!;
-    print OUT join "\n",(@cases[@case_index],@controls[@control_index]);
-    close (OUT);
+if (defined $cv){
+	my @new_sets = ();
+	fisher_yates_shuffle( \@cases); 
+	fisher_yates_shuffle( \@controls);
+	my $cases_chunk_size = int(scalar @cases/$cv);
+	my $cases_start = 0;
+	my $cases_end = $cases_chunk_size;  
+	
+	my $controls_chunk_size = int(scalar @controls/$cv);
+	my $controls_start = 0;
+	my $controls_end = $controls_chunk_size;  
+	for my $i (0 .. $cv-1){
+		if ($i == $cv-1){
+			$cases_end = scalar @cases;
+			$controls_end = scalar @controls;
+		}
+		push @{$new_sets[$i]} , @cases[$cases_start..$cases_end-1];
+		push @{$new_sets[$i]} , @controls[$controls_start..$controls_end-1];
+		$cases_start += $cases_chunk_size;
+		$cases_end += $cases_chunk_size;
+		$controls_start += $controls_chunk_size;
+		$controls_end += $controls_chunk_size;
+	}
+	for my $i (0 .. $cv-1){
+		my @index = 0..$cv - 1;
+		splice(@index,$i,1);
+		$i++;
+		open (OUT,">$out.$i") or die $!;
+		my @set = map { @{$_}; } @new_sets[@index];
+		print OUT join "\n",@set;
+		close (OUT);
+	}	
+} else {
+	for my $i (1 .. $N){
+	    my @case_index  = @{get_rand_index(scalar @cases,int(scalar @cases*$size))}; 
+	    my @control_index  = @{get_rand_index(scalar @controls,int(scalar @controls*$size))}; 
+	    open (OUT,">$out.$i") or die $!;
+	    print OUT join "\n",(@cases[@case_index],@controls[@control_index]);
+	    close (OUT);
+	}
 }
 print scalar localtime, "\tWell Done\n";
 
@@ -70,6 +107,17 @@ sub get_rand_index {
 	}
 	return(\@index);
 }
+
+# generate a random permutation 
+# of @array in place 
+sub fisher_yates_shuffle {     
+	my $array = shift;
+	for (my $i = @$array; --$i; ) {
+		my $j = int rand ($i+1);
+		next if $i == $j;
+		@$array[$i,$j] = @$array[$j,$i];
+	} 
+}  
 
 
 

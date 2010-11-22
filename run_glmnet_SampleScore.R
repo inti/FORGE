@@ -60,15 +60,19 @@ cat("loading data\n")
 cat("   '-> Reading phenotypes from [",fam,"]\n",sep=" ")
 dat<-read.table(fam,header=T)
 cat("   '-> Sene Scores from [",scores,"]\n",sep=" ")
-sc<-read.table(scores,row.names=1)
-m<-t(sc[,2:ncol(sc)])
-m_var<-apply(m,2, function(x) var(x))
-m2<-m[,unique(c(which( m_var > 0),which( is.na(m_var) == "FALSE"  )))]
-n_cols_removed<-abs(ncol(m) - ncol(m2))
-if ( n_cols_removed > 0){
-	cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
-}
+sc<-read.table(scores,row.names=1) # genes in the rows
+cat("   '-> [",ncol(sc),"] genes read\n",sep=" ")
+m<-as.matrix(sc[,2:ncol(sc)]) # genes in the row
+m_var<-apply(m,1, function(x) (max(x) - min(x)))
+m2<-m[which( m_var != 0),]
+n_cols_removed<-abs(nrow(m) - nrow(m2))
 m<-m2
+
+cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
+
+cat("Making have mean 0 and sd 1\n",sep=" ")
+m<-apply(m,1,function(row) (row - mean(row))/sd(row) ) # gene back in columns
+m<-t(m) # genes in rows
 N_predictors<-ncol(m)
 
 cat("Removing non-needed data\n")
@@ -93,14 +97,14 @@ if (cov != "F"){
         cov2[cov2==-9]<-NA
         m<-rbind(m,cov2)
 }
-fit1.cv<-cv.glmnet(m,factor(phenotype),family=test_family)
+fit1.cv<-cv.glmnet(t(m),factor(phenotype),family=test_family)
 #recode the phenotype
 new_phe<-dat$TRAIT
 new_phe[new_phe == 1]<--1
 new_phe[new_phe == 2]<-1
 # calculate the predicted phenotypes
 cat("Predicting phenotype\n")
-p<-predict(fit1.cv$glmnet.fit,m[,1:N_predictors],s=fit1.cv$lambda.min)
+p<-predict(fit1.cv$glmnet.fit,t(m[,1:N_predictors]),s=fit1.cv$lambda.min)
 cat("Calculting pseudo R-square\n")
 pseudoR2<-pseudo_r_square(new_phe,p)
 pseudoR2<-as.data.frame(pseudoR2)

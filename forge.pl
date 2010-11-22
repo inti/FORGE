@@ -21,7 +21,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ped, $map, $ox_gprobs,$sample_score_self,
+
 );
 
 GetOptions(
@@ -50,7 +50,6 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
-   'w_maf' => \$w_maf,
    'weight_by_maf|w_maf' => \$w_maf,
 ) or pod2usage(0);
 

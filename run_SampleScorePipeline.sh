@@ -49,15 +49,15 @@ perl $FORGE_PATH -bfile $TMP_DIR/$1.target.chr$CHR \
 	-sample_score \
 	-o $TMP_DIR/$OUT_TAG 
 
-#R --no-save --no-readline \
-#	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
-#	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
-#	out=$TMP_DIR/$OUT_TAG.sample_score.genep  < /storage/adata/FORGE/Development/FORGE/Sample_Score.R
+R --no-save --no-readline \
+	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
+	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
+	out=$TMP_DIR/$OUT_TAG.sample_score.genep  < /storage/adata/FORGE/Development/FORGE/Sample_Score.R
 
-#R --no-save --no-readline \
-#	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
-#	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
-#	out=$TMP_DIR/$OUT_TAG.sample_score test_family=binomial  < /storage/adata/FORGE/Development/FORGE/run_glmnet_SampleScore.R
+R --no-save --no-readline \
+	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
+	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
+	out=$TMP_DIR/$OUT_TAG.sample_score test_family=binomial  < /storage/adata/FORGE/Development/FORGE/run_glmnet_SampleScore.R
 
 mv $TMP_DIR/$1.trainning.chr$CHR.* $FINAL_DIR
 mv $TMP_DIR/$1.target.chr$CHR.* $FINAL_DIR

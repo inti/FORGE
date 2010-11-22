@@ -62,10 +62,18 @@ dat<-read.table(fam,header=T)
 cat("   '-> Sene Scores from [",scores,"]\n",sep=" ")
 sc<-read.table(scores,row.names=1)
 m<-t(sc[,2:ncol(sc)])
+m_var<-apply(m,2, function(x) var(x))
+m2<-m[,unique(c(which( m_var > 0),which( is.na(m_var) == "FALSE"  )))]
+n_cols_removed<-abs(ncol(m) - ncol(m2))
+if ( n_cols_removed > 0){
+	cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
+}
+m<-m2
 N_predictors<-ncol(m)
 
 cat("Removing non-needed data\n")
 rm(sc)
+rm(m2)
 # make phenotypes 0 or 1
 cat("running cross validation and fitting lasso\n")
 if (qt == "F"){

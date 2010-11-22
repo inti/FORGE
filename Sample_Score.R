@@ -48,7 +48,8 @@ if (qt == "T"){
 expected_coeff<-1
 perm_p<-"F"
 if (cov == "F") {
-  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff) } )
+  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)} } )
+  
   if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")
     perm<-as.numeric(perm)
@@ -89,7 +90,7 @@ if (cov == "F") {
   cov2<-read.table(cov)
   cov2<-as.matrix(cov2[,3:ncol(cov2)])
   cov2[cov2==-9]<-NA
-  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { list( coefficients= summary(glm(phenotype ~ row + cov2,family=test_family))$coeff) } )
+  assoc<-apply(sc[,2:ncol(sc)],1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row + cov2,family=test_family))$coeff)} } )
   expected_coeff<-ncol(cov2) + 1
     if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")

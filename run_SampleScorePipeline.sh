@@ -38,7 +38,6 @@ plink --bfile $TMP_DIR/$1.trainning.chr$CHR \
     --logistic \
     --out $TMP_DIR/$1.trainning.chr$CHR \
     --chr $CHR
-
 # define output tag
 OUT_TAG=$1.target.chr$CHR
 
@@ -49,12 +48,12 @@ perl $FORGE_PATH -bfile $TMP_DIR/$1.target.chr$CHR \
 	-sample_score \
 	-o $TMP_DIR/$OUT_TAG 
 
-R --no-save --no-readline \
+R --no-save --no-readline --slave \
 	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
 	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
 	out=$TMP_DIR/$OUT_TAG.sample_score.genep  < /storage/adata/FORGE/Development/FORGE/Sample_Score.R
 
-R --no-save --no-readline \
+R --no-save --no-readline --slave \
 	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
 	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
 	out=$TMP_DIR/$OUT_TAG.sample_score test_family=binomial  < /storage/adata/FORGE/Development/FORGE/run_glmnet_SampleScore.R

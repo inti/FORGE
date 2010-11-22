@@ -21,6 +21,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
+    $self_score,
 
 );
 
@@ -51,6 +52,7 @@ GetOptions(
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
    'weight_by_maf|w_maf' => \$w_maf,
+   'self_score' => \$self_score,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -747,7 +749,13 @@ sub gene_pvalue {
 	$MAF_w = 1/$MAF_w;
 	$gene{$gn}->{weights} *= $MAF_w->transpose;
     }
-
+    
+    # EXPERIMENTAL
+    if (defined $self_score){
+        $gene{$gn}->{weights} = $gene{$gn}->{pvalues}/$gene{$gn}->{pvalues}->flat->sum;
+    }
+    # EXPERIMENTAL
+    
     # Correct the weights by the LD in the gene.
     # the new weight will be the weigthed mean of the gene.
     # the new weight will be the weigthed mean of the gene weights.

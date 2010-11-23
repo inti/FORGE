@@ -752,7 +752,16 @@ sub gene_pvalue {
     
     # EXPERIMENTAL
     if (defined $self_score){
-        $gene{$gn}->{weights} = $gene{$gn}->{pvalues}/$gene{$gn}->{pvalues}->flat->sum;
+	$gene{$gn}->{weights} *= $gene{$gn}->{pvalues};
+	sub flip_number {
+		# flips a ration be always greater than 1
+		my $num = shift;
+		return $num if ($num > 1);
+		return 1/$num if ($num < 1);
+	}
+	my $gene_or = pdl map { flip_number( $assoc_data{ $_ }{beta} ) } @{ $gene{$gn}->{geno_mat_rows} };
+	print $gene_or;
+	getc;
     }
     # EXPERIMENTAL
     

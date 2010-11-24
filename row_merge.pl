@@ -11,6 +11,7 @@ our ( $help, $man, $out, $files, $cols,$outfile,$keep,$space);
 
 GetOptions(
    'help|h' => \$help,
+   'man' => \$man,
    'file|f=s@' => \$files,
    'column|c=i@' => \$cols,
    'out|o=s' => \$outfile,
@@ -83,4 +84,69 @@ sub print_OUT {
   my $string = shift;
   print scalar localtime(), "\t$string\n";
 }
+
+
+
+__END__
+
+=head1 NAME
+
+to use do something like
+$ perl row_merge.pl -f file1 -c 1 -c 2 -c 6 -f file2 -c 2 -c 4 -c 6 -o file1_file2_merged
+where the columns specified after a file tell the program which fields to use to merger the files. In this way you can specify diff columns for different files
+
+
+=head1 SYNOPSIS
+
+script [options]
+
+ 	-h, --help		print help message
+ 	-m, --man		print complete documentation
+        -file, -f               Input files to be merge
+        -column, -c             columns by which to merge the file
+        -out, -o                output file
+        -keep                   keep the columns by which the files were merge. Default is to keep them only in the first file
+        -space                  Output file separated by spaces. Default is tab.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-help>
+
+Print help message
+  
+=item B<-man>
+
+print complete documentation
+
+=item B<-file, -f>
+
+Input files to be merge
+
+=item B<-column, -c>
+
+Columns by which to merge the file
+
+=item B<-out, -o>
+
+Output file
+
+=item B<-keep>
+
+Keep the columns by which the files were merge. Default is to keep them only in the first file
+
+=item B<-space>
+
+Output file separated by spaces. Default is tab.
+
+
+
+=back
+
+=head1 DESCRIPTION
+
+intipedroso@gmail.com
+
+=cut
 

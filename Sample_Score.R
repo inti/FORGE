@@ -96,7 +96,7 @@ if (cov == "F") {
   }
 } else {
   cat("Using covariates in the regression analysis\n",sep=" ")
-  cat("   '-> Reading covariantes from [",cov,"]\n",sep=" ")
+  cat("   '-> Reading covariates from [",cov,"]\n",sep=" ")
   cov2<-read.table(cov)
   cov2<-as.matrix(cov2[,3:ncol(cov2)])
   cov2[cov2==-9]<-NA

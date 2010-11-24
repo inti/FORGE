@@ -37,6 +37,7 @@ foreach my $f (@$files){
     open (IN,$f) or print_OUT("Cannot open [$f] ") and exit(1);
     my @cols_to_extract = splice(@$cols,0,$key_number);
     while (my $line = <IN>) {
+        next if ($line=~ m/\#/);
         chomp($line);
         my @data= split(/[\s+\t+]/,$line);
         my $key = join "", @data[@cols_to_extract];

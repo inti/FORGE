@@ -34,10 +34,11 @@ print_OUT("Reading input files");
 my %key_data = ();
 foreach my $f (@$files){
     print_OUT("   '-> Reading [ $f ]");
-    open (IN,$f) or print_OUT("Cannot open [$f] ") and exit(1);
     my @cols_to_extract = splice(@$cols,0,$key_number);
+    print_OUT("   '-> merging by columns [ @cols_to_extract ]");
+    open (IN,$f) or print_OUT("Cannot open [$f] ") and exit(1);    
     while (my $line = <IN>) {
-        next if ($line=~ m/\#/);
+        next if ($line =~ m/#/);
         chomp($line);
         my @data= split(/[\s+\t+]/,$line);
         my $key = join "", @data[@cols_to_extract];

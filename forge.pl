@@ -864,8 +864,7 @@ sub sample_score {
     }
     $score_means = pdl $score_means;
     my $mean_over_all_scores = $score_means->davg;
-    
-    my $cov = covariance($geno_mat->transpose);    
+    my $cov = covariance($geno_mat->transpose);
     my $var_covMat = $cov->flat->dsum;
     my $sample_z = pdl map { ($geno_mat->($_,)->flat->dsum - $mean_over_all_scores)/$var_covMat; } 0..$n_samples-1;
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;

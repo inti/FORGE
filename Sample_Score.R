@@ -30,7 +30,7 @@ cat("Reading samples and phenotypes from [",fam,"]\n",sep=" ")
 dat<-read.table(fam,header=T)
 cat("Reading gene scores from [",scores,"]\n",sep=" ")
 sc<-read.table(scores,row.names=1) # genes in the rows
-cat("   '-> [",ncol(sc),"] genes read\n",sep=" ")
+cat("   '-> [",nrow(sc),"] genes read\n",sep=" ")
 m<-as.matrix(sc[,2:ncol(sc)]) # genes in the row
 m_var<-apply(m,1, function(x) (max(x) - min(x)))
 m2<-m[which( m_var != 0),]

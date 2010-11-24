@@ -639,7 +639,7 @@ sub get_genotypes {
   my @back = ();
   my @genotypes = ( $b =~ m/\d{2}/g ); # extract a pair of number = a genotype
   foreach my $geno (@genotypes){
-    # 10 indicates missing genotype, otherwise 0 and 1 point to allele 1 or allele 2 in the BIM file, respectively
+    # 10 indicates missing genotype, otherwise 0 and 1 point to allele 1 (minor) or allele 2 (mayor) in the BIM file, respectively
     if    ( $geno eq '00' ) {  # homozygous 1/1
       push @back, '1';
     } elsif ( $geno eq '11' ) { # -- other homozygous 2/2
@@ -749,22 +749,7 @@ sub gene_pvalue {
 	$MAF_w = 1/$MAF_w;
 	$gene{$gn}->{weights} *= $MAF_w->transpose;
     }
-    
-    # EXPERIMENTAL
-    if (defined $self_score){
-	$gene{$gn}->{weights} *= $gene{$gn}->{pvalues};
-	sub flip_number {
-		# flips a ration be always greater than 1
-		my $num = shift;
-		return $num if ($num > 1);
-		return 1/$num if ($num < 1);
-	}
-	my $gene_or = pdl map { flip_number( $assoc_data{ $_ }{beta} ) } @{ $gene{$gn}->{geno_mat_rows} };
-	print $gene_or;
-	getc;
-    }
-    # EXPERIMENTAL
-    
+        
     # Correct the weights by the LD in the gene.
     # the new weight will be the weigthed mean of the gene.
     # the new weight will be the weigthed mean of the gene weights.
@@ -833,46 +818,15 @@ sub sample_score {
     my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
     my $index = 0;
     my $geno_mat = double  $gene->{genotypes}->copy;
+    
     # recode the genotypes
     if (defined $v ){ print "Genotypes raw\n" . $geno_mat->(0:5,),"\n"; }
     my $snps_effect_size = [];
     my $direction_of_effect = undef;
     my $effect_size_in_use = undef;
     foreach my $snp_info (@snp_info){
-        if (not defined $direction_of_effect){
-            $effect_size_in_use = $snp_info->{effect_size_measure};
-            if ($effect_size_in_use eq 'or'){
-                $direction_of_effect = "$snp_info->{ or } < 1";
-            } elsif ($effect_size_in_use eq 'beta'){
-                $direction_of_effect = "$snp_info->{ beta } < 0";
-            } elsif ($effect_size_in_use eq 'stat'){
-                $direction_of_effect = "$snp_info->{ stat } < 0";
-            }
-        }
-        if ($direction_of_effect){
-            # 1 -> 0
-            # 2 -> 1
-            # 3 -> 2
-            # 0 -> 0
-            if ($effect_size_in_use eq 'or'){
-                push @{$snps_effect_size}, log( 1/$snp_info->{ $snp_info->{effect_size_measure} } );
-            } else {
-                push @{$snps_effect_size}, -1 * $snp_info->{ $snp_info->{effect_size_measure} } ;
-            }
-            $geno_mat->( which($geno_mat->(,$index) > 0), $index) -= 1;
-        } else {
-            # 1 -> 2
-            # 2 -> 1
-            # 3 -> 0
-            # 0 -> 0
-            push @{ $snps_effect_size }, $snp_info->{$snp_info->{effect_size_measure}};
-            $geno_mat->( which($geno_mat->(,$index) == 1), $index) += 1;
-            $geno_mat->( which($geno_mat->(,$index) == 2), $index) -= 1;
-            $geno_mat->( which($geno_mat->(,$index) == 3), $index) *= 0;
-        }
-        $index++;
-    }
-    
+        push @{$snps_effect_size}, $snp_info->{ $snp_info->{effect_size_measure} };
+    }   
     $snps_effect_size= pdl @{$snps_effect_size};
     
     if (defined $v ){ print "Genotypes recoded\n",$geno_mat->(0:5,),"\n"; }
@@ -893,39 +847,36 @@ sub sample_score {
     if (defined $v ){ print $gene->{weights},"\n"; }
     $geno_mat *= $gene->{weights}->transpose;
     
-    # EXPERIMENTAL: weigthing by the 1/MAF
-    if (defined $w_maf){
-	my $MAF_w = [];
-	for my $i (0 .. $n_snps - 1) {
-	    my $tmp_maf = $geno_mat->(,$i)->flat->sum/$geno_mat->nelem;
-	    $tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
-	    push @{$MAF_w}, $tmp_maf;
-	}
-	$MAF_w = pdl $MAF_w;
-	$MAF_w = 1/$MAF_w;
-	$geno_mat *= $MAF_w->transpose;
-    }
-    # EXPERIMENTAL: weigthing by the 1/MAF
     
     if (defined $v ){
         print "new dims: ", join " ", $geno_mat->dims,"\n";
         print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
     }
-    unless (defined $sample_score_self){
-    	$geno_mat *= $snps_effect_size->transpose; 
-    }
-    if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
     
-    my $out_line = "$gene->{ensembl} $gene->{hugo}";  
-    foreach (my $i = 0; $i < $n_samples; $i++){
-        my $sample_w = $geno_mat->($i,)->flat;
-        $sample_w += $sample_w->(which($sample_w > 0))->min;
-        my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
-        # get the p-value
-        my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df);
-        $out_line .= " $sample_score_p_value";
+    $geno_mat *= $snps_effect_size->transpose; 
+    
+    if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
+
+    my $score_means = [];
+    for my $s (0..$n_snps-1){
+    	my $mean = double $geno_mat->(,$s)->davg;
+	push @{ $score_means }, $mean;
     }
+    $score_means = pdl $score_means;
+    my $mean_over_all_scores = $score_means->davg;
+    
+    my $cov = covariance($geno_mat->transpose);    
+    my $var_covMat = $cov->flat->dsum;
+    my $sample_z = pdl map { ($geno_mat->($_,)->flat->dsum - $mean_over_all_scores)/$var_covMat; } 0..$n_samples-1;
+    my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
+
     print $out_fh_sample_score_mat "$out_line\n";
+}
+sub covariance {
+    my ( $X ) = shift;
+    my $Diff = $X - daverage( $X->xchg(0,1) );
+    my $Sigma = ( 1 / ( $X->getdim(1) - 1 ) ) * $Diff->transpose x $Diff;
+    return $Sigma;
 }
 
 # this subroutine applies the makambi method to combine p-values from correlated test

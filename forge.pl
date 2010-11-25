@@ -16,7 +16,6 @@ use Pod::Usage;
 
 my $VERSION = "0.9.5.6";
 
-
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
@@ -104,9 +103,10 @@ if (defined $geno_probs and defined $sample_score){
 =cut
 } 
 
-open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
-print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
-
+unless (defined $no_forge){
+	open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
+	print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
+}
 
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){

@@ -784,55 +784,62 @@ sub sample_score {
     my $snp_index = shift; # index of SNPs in genptype file
     my $geno_probs = shift; # file handel for file with genotype probabilities.
     my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
+    
+    # alleles have been coded as 1 : homozygote 1/1 minor allele, 2 heterozygous, 3: homozygote 2/2 major allele and 0: missing.
+    my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
+    my $index = 0;
+    my $geno_mat = double  $gene->{genotypes}->copy;
+    
     # get snps info
     my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
     # counter to index the snps
-    my $snp_counter = 0;
     # array to store the genotype probs of each sample
     # each element in the array will a ref to an array which contains the prob for each snp for this sample
     my @sample_geno_prob = ();
     # go over each snps
     if (defined $geno_probs){
+        my $snp_counter = 0;
+        my $geno_prob_mat = [];
         foreach my $snp (@snp_info){
             # use the index in teh bim or map file to find the line in the genotype prob file
             # my index starts from 0 but the lines in the file from, 1 so add 1
             my $desired_line = $snp_index->{$snp->{id}} + 1;
-            # get the line
+            # get the line. line has information for 1 SNP and all Samples
             my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
             # split the information in the line
             my @genos = split(/[\t+\s+]/,$line);
-            # now loop for all sample for this snps
+            # now loop over all samples for this snps
             my $sample_counter = 0;
+            # counter start from 5 because the first columns are chromosome, SNP id, position, minor allele and major allele
+            # counter increases by three because each sample has 3 genotype probabilities for the AA, AB and BB, with A the minor allele
             for (my $g = 5; $g < scalar @genos; $g +=3){
                 # for each sample store the 3 genotype probs 
                 push @{ $sample_geno_prob[$sample_counter] }, [$genos[$g],$genos[$g+1],$genos[$g+2]];
+                # if the genotype is missing. set its probability to 0
+                # otherwise get prob index is $g (the start for the genotype is the sample) + the count of minor alleles
+                if ($geno_mat->($sample_counter,$snp_counter)->sclr == 0){
+                    $geno_prob_mat->[$sample_counter][$snp_counter] = 0;
+                } else { 
+                    my $index = $g + $geno_mat->($sample_counter,$snp_counter)->sclr - 1; # -1 because my count of minor allales is shifted by 1
+                    $geno_prob_mat->[$sample_counter][$snp_counter] = $genos[$index] ;
+                }
                 $sample_counter++;
             }
             if (not defined $line){ print_OUT("Trying to fetch line out of range in sample score analysis. Line [ $desired_line ] was requested.") and exit(1); }
             $snp_counter++;
         }
+        $geno_prob_mat = pdl $geno_prob_mat;
+        my $tmp = $geno_prob_mat x $geno_mat;
+        print $tmp->(1:10,1:10);
+        getc;
+    
     }
-    
-    # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
-    # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
-    my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
-    my $index = 0;
-    my $geno_mat = double  $gene->{genotypes}->copy;
-    
-    # recode the genotypes
-    if (defined $v ){ print "Genotypes raw\n" . $geno_mat->(0:5,),"\n"; }
-    my $snps_effect_size = [];
-    my $direction_of_effect = undef;
-    my $effect_size_in_use = undef;
-    foreach my $snp_info (@snp_info){
-        push @{$snps_effect_size}, $snp_info->{ $snp_info->{effect_size_measure} };
-    }   
-    $snps_effect_size= pdl @{$snps_effect_size};
-    
-    if (defined $v ){ print "Genotypes recoded\n",$geno_mat->(0:5,),"\n"; }
     if (defined $geno_probs){
+        # array to store the genotype probabilities
         my $geno_prob_mat = [];
-        for (my $i = 0; $i < $n_samples; $i++){    
+        # loop over the samples
+        for (my $i = 0; $i < $n_samples; $i++){
+            # loop over the SNPs anf for each sample push its genotypes into the matrix
             foreach (my $j = 0; $j < $n_snps; $j++ ){
                 push @{ $geno_prob_mat->[$j] }, $sample_geno_prob[$i]->[$j]->[$geno_mat->($i,$j)->sclr];
             }
@@ -844,16 +851,22 @@ sub sample_score {
             print "Genotypes * geno prob\n", $geno_mat->(0:5,),"\n";
         }
     }
-    if (defined $v ){ print $gene->{weights},"\n"; }
-    $geno_mat *= $gene->{weights}->transpose;
     
     
-    if (defined $v ){
-        print "new dims: ", join " ", $geno_mat->dims,"\n";
-        print "Genotypes * geno prob * weights\n", $geno_mat->(0:5,),"\n";
+    # store the SNP effect sizefor the minor allele
+    my $snps_effect_size = [];
+    foreach my $snp_info (@snp_info){
+        if ($snp_info->{effect_size_measure} eq 'or'){
+            push @{$snps_effect_size}, log $snp_info->{ $snp_info->{effect_size_measure} } ;            
+        } else {
+            push @{$snps_effect_size}, $snp_info->{ $snp_info->{effect_size_measure} };
+        }
     }
+    $snps_effect_size= pdl @{$snps_effect_size}; # make it a piddle
     
-    $geno_mat *= $snps_effect_size->transpose; 
+    # extract genotype probabilities
+    
+    $geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
     
     if (defined $v ){ print "Genotypes * geno prob * weights * OR\n", $geno_mat->(0:5,),"\n"; }
 
@@ -863,15 +876,17 @@ sub sample_score {
 	push @{ $score_means }, $mean;
     }
     $score_means = pdl $score_means;
-    my $mean_over_all_scores = $score_means->davg;
+    my $sum_over_all_scores = $score_means->dsum;
     my $cov = covariance($geno_mat->transpose);
     my $var_covMat = $cov->flat->dsum;
-    my $sample_z = pdl map { ($geno_mat->($_,)->flat->dsum - $mean_over_all_scores)/$var_covMat; } 0..$n_samples-1;
+    my $sample_z = pdl map { ($geno_mat->($_,)->flat->dsum - $sum_over_all_scores)/$var_covMat; } 0..$n_samples-1;
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
 
     print $out_fh_sample_score_mat "$out_line\n";
 }
+
 sub covariance {
+    # calculate the covariance matrix by the ML method
     my ( $X ) = shift;
     my $Diff = $X - daverage( $X->xchg(0,1) );
     my $Sigma = ( 1 / ( $X->getdim(1) - 1 ) ) * $Diff->transpose x $Diff;

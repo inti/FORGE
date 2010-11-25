@@ -30,7 +30,7 @@ cat("Reading samples and phenotypes from [",fam,"]\n",sep=" ")
 dat<-read.table(fam,header=T)
 cat("Reading gene scores from [",scores,"]\n",sep=" ")
 sc<-read.table(scores,row.names=1) # genes in the rows
-cat("   '-> [",ncol(sc),"] genes read\n",sep=" ")
+cat("   '-> [",nrow(sc),"] genes read\n",sep=" ")
 m<-as.matrix(sc[,2:ncol(sc)]) # genes in the row
 m_var<-apply(m,1, function(x) (max(x) - min(x)))
 m2<-m[which( m_var != 0),]
@@ -96,7 +96,7 @@ if (cov == "F") {
   }
 } else {
   cat("Using covariates in the regression analysis\n",sep=" ")
-  cat("   '-> Reading covariantes from [",cov,"]\n",sep=" ")
+  cat("   '-> Reading covariates from [",cov,"]\n",sep=" ")
   cov2<-read.table(cov)
   cov2<-as.matrix(cov2[,3:ncol(cov2)])
   cov2[cov2==-9]<-NA

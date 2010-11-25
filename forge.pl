@@ -22,8 +22,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ss_mean
-
+    $ss_mean, $no_forge,
 );
 
 GetOptions(
@@ -53,6 +52,7 @@ GetOptions(
    'ox_gprobs=s' => \$ox_gprobs,
    'weight_by_maf|w_maf' => \$w_maf,
    'ss_mean' => \$ss_mean,
+   'no_forge' => \$no_forge,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -211,15 +211,15 @@ while (  my $a = <ASSOC> ) {
     } 
   }
   $assoc_data{ $data[$header{"SNP"}] } = {
-                				'pvalue' => 1 ,
-						'id' => $data[$header{"SNP"}],
-						'a1' => $A1,
-						'a2' => $A2,
-						'or' => $OR,
-                                                'beta' => $BETA,
-                                                'stat' => $STAT,
-                                                'r2' => $R2,
-                                                'effect_size_measure' => $effect,
+                                        'pvalue' => 1 ,
+                                        'id' => $data[$header{"SNP"}],
+                                        'a1' => $A1,
+                                        'a2' => $A2,
+                                        'or' => $OR,
+                                        'beta' => $BETA,
+                                        'stat' => $STAT,
+                                        'r2' => $R2,
+                                        'effect_size_measure' => $effect,
         				};
    # correct for genomic control if a lambda > 1 was specified.   
    if ($lambda == 1) {
@@ -229,9 +229,7 @@ while (  my $a = <ASSOC> ) {
    } else { 
 	print_OUT("\nPlease check the lambda value is correct\n");
 	exit(1);
-   }
-   
-   
+   }  
 }
 close(ASSOC);
 
@@ -486,7 +484,9 @@ if (defined $bfile) {
         $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
     }
     # calculate gene p-values
-    &gene_pvalue($gn);
+    &gene_pvalue($gn) if (not defined $no_forge);
+    &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+
     # delete the gene's data to keep memory usage low
     delete($gene{$gn});
     $count++;
@@ -514,7 +514,8 @@ if (defined $bfile) {
             $gene{$gn}->{weights} *= 1/$n_snps;
             $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
         }
-	  &gene_pvalue($gn);
+	  &gene_pvalue($gn) if (not defined $no_forge);
+          &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 	  delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 	  unless (scalar keys %gene < 100){
@@ -771,7 +772,6 @@ sub gene_pvalue {
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
   # finally if requested calculate the gene-score for all samples
-  &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 }
 
 # this subroutine calcultes a gene-score for each sample
@@ -779,7 +779,6 @@ sub gene_pvalue {
 sub sample_score {
     my $gene = shift; # pseudohash with gene information
     my $assoc = shift; # ref to a hash
-    my $cor_matrix = shift; # pdl matrix object
     my $snp_index = shift; # index of SNPs in genptype file
     my $geno_probs = shift; # file handel for file with genotype probabilities.
     my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
@@ -814,7 +813,7 @@ sub sample_score {
                 # if the genotype is missing. set its probability to 0
                 # otherwise get prob index is $g (the start for the genotype is the sample) + the count of minor alleles
                 if ($geno_mat->($sample_counter,$snp_counter)->sclr == 0){
-			push @{$geno_probs[$sample_counter]} , 0;
+			push @{ $geno_probs[$sample_counter] } , 0;
                 } else { 
                     my $index = $g + $geno_mat->($sample_counter,$snp_counter)->sclr - 1; # -1 because my count of minor allales is shifted by 1
 		    push @{$geno_probs[$sample_counter]} , $genos[$index];
@@ -851,14 +850,13 @@ sub sample_score {
     my $sample_z = null;
    
     if (defined $ss_mean){
-	    my $mean_over_all_scores = $score_means->davg; # the expected value is the sum of the means
+	    my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
 	    my $var_covMat = $cov->flat->dsum; # this is the variance of the test
 	    # standarize each sample score by the mean and variance of the distribution
 	    $sample_z = pdl map { 
 			($geno_mat->($_,)->flat->davg - $mean_over_all_scores)/$var_covMat; 
 		} 0..$n_samples-1;
-    
     } else {
 	    my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
@@ -1252,8 +1250,11 @@ script [options]
  	-chr			Anlyze a specific chromosome  
  	-distance, -d		Max SNP-to-gene distance allowed (in kb)
 	-correlation, -cor	SNP-SNP correlation file
- 	-lambda			lambda value to correct SNP statistics, if genomic control is used
  	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+        -lambda			lambda value to correct SNP statistics, if genomic control is used
+        -no_forge               Do not do a forge analysis. e.g. if only performing sample-scoring
+        
+        Weigthing
         -weights, -w            File with SNP weights
         -w_header               Indicate if the SNP weight file has a header.
         -weight_by_maf, -w_maf  Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
@@ -1262,8 +1263,9 @@ script [options]
         -sample_score		Generate sample level score (it requieres sample level genotypes).
         -ox_gprobs              Genotype probabilities in OXFORD format.
 	-ss_mean		Calculate the sample score as the mean of the sample's risk loading, Default is the sum.
-
+        
 	
+        
 =head1 OPTIONS
 
 =over 8

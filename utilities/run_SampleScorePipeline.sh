@@ -8,49 +8,20 @@
 #$ -t 1-26:1
 #$ -N sampleScorePipeline
 
-IDLIST=$1
+ASSOC=$1
 BFILE=$2
-CHR=$SGE_TASK_ID
-#CHR=$4
 #TMP_DIR=/tmp
 TMP_DIR=$3
 FINAL_DIR=$3
+#CHR=$SGE_TASK_ID
+CHR=$5
+OUT_TAG=$4.chr$CHR
+
 FORGE_PATH=/storage/adata/FORGE/Development/FORGE/forge.pl
 ANNOTATION_FOLDER=/storage/adata/FORGE/SNPtoGeneAnnotation/Ensemble_gene_SNP_v59
 
-echo Making PLINK Binary files for the TRAINNING set
-plink  --bfile $BFILE \
-    --keep $IDLIST \
-    --all \
-    --out $TMP_DIR/$1.trainning.chr$CHR \
-    --make-bed \
-    --chr $CHR \
-    --silent 
-echo Files written to $TMP_DIR/$1.trainning.chr$CHR.*
-    
-echo Making PLINK Binary files for the TARGET set        
-plink  --bfile $BFILE \
-    --remove $IDLIST \
-    --all \
-    --out $TMP_DIR/$1.target.chr$CHR \
-    --make-bed \
-    --chr $CHR \
-    --silent     
-echo Files written to $TMP_DIR/$1.target.chr$CHR.*
-    
-echo Running association analysis for the TRAINNING set
-plink --bfile $TMP_DIR/$1.trainning.chr$CHR \
-    --logistic \
-    --out $TMP_DIR/$1.trainning.chr$CHR \
-    --chr $CHR \
-    --silent 
-echo Files written to $TMP_DIR/$1.trainning.chr$CHR.*
-
-# define output tag
-OUT_TAG=$1.target.chr$CHR
-
-perl $FORGE_PATH -bfile $TMP_DIR/$1.target.chr$CHR \
-	-a $TMP_DIR/$1.trainning.chr$CHR.assoc.logistic \
+perl $FORGE_PATH -bfile $BFILE \
+	-a $ASSOC \
 	-chr $CHR \
         -m $ANNOTATION_FOLDER/ensemblv59_SNP_2_GENE.chr$CHR.txt \
 	-sample_score \

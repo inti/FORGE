@@ -16,7 +16,6 @@ use Pod::Usage;
 
 my $VERSION = "0.9.5.6";
 
-
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
@@ -104,9 +103,10 @@ if (defined $geno_probs and defined $sample_score){
 =cut
 } 
 
-open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
-print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
-
+unless (defined $no_forge){
+	open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
+	print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
+}
 
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){
@@ -771,7 +771,7 @@ sub gene_pvalue {
    my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
-  # finally if requested calculate the gene-score for all samples
+
 }
 
 # this subroutine calcultes a gene-score for each sample
@@ -784,6 +784,8 @@ sub sample_score {
     my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
     
     # alleles have been coded as 1 : homozygote 1/1 minor allele, 2 heterozygous, 3: homozygote 2/2 major allele and 0: missing.
+    
+    if (not defined $gene ){ return(0); }
     my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
     my $geno_mat = $gene->{genotypes}->copy;
     my $index = 0;

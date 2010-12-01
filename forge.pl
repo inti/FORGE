@@ -840,34 +840,28 @@ sub sample_score {
     }
     $snps_effect_size= pdl @{$snps_effect_size}; # make it a piddle
     # multiply the genotypes by the effect size and the weights
-    $geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
+    #$geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
     
     # calculate the mean of the scores for each SNP
-    my $score_means = [];
-    for my $s (0..$n_snps-1){
-	my $mean = double $geno_mat->(,$s)->davg;
-	push @{ $score_means }, $mean;
-    }
-    $score_means = pdl $score_means; # piddle with the scores means for each SNP
+    my $score_means = dsumover $geno_mat/$geno_mat->getdim(0);
     my $sample_z = null;
-   
     if (defined $ss_mean){
 	    my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
 	    my $var_covMat = $cov->flat->dsum; # this is the variance of the test
 	    # standarize each sample score by the mean and variance of the distribution
-	    $sample_z = pdl map { 
-			($geno_mat->($_,)->flat->davg - $mean_over_all_scores)/$var_covMat; 
-		} 0..$n_samples-1;
+	    $sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
+		$sample_z -= $mean_over_all_scores;
+		$sample_z /= $var_covMat;
     } else {
-	    my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
+		my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-	    my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
-	    # standarize each sample score by the mean and variance of the distribution
-	    $sample_z = pdl map { 
-				($geno_mat->($_,)->flat->dsum - $sum_over_all_scores)/$var_covMat; 
-			} 0..$n_samples-1;
+		my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
+		$sample_z = dsumover $geno_mat->xchg(0,1);
+		$sample_z -= $sum_over_all_scores;
+		$sample_z /= $var_covMat;
     }
+	
     # add values to output line
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
     print $out_fh_sample_score_mat "$out_line\n";

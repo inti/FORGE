@@ -50,7 +50,7 @@ phenotype<-0
 dat[dat==-9]<-NA
 if (qt == "F"){
   cat("   '-> Using a binary trait\n",sep=" ")
-  phenotype<-as.factor(dat$TRAIT == 1)
+  phenotype<-as.factor(dat[,pheno_name] == 1)
 }
 if (qt == "T"){
   cat("   '-> Using a continous trait\n",sep=" ")
@@ -61,7 +61,14 @@ expected_coeff<-1
 perm_p<-"F"
 cat("Running GLM model for genes\n",sep=" ")
 if (cov == "F") {
-  assoc<-apply(sc,1, function(row) { reg<-glm(phenotype ~ row,family=test_family); if ( is.null( warnings() ) != TRUE){ print(warnings());}; list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)}  )
+	assoc<-apply(sc,1, function(row) { 
+		reg<-glm(phenotype ~ row,family=test_family)
+		if (reg$converged == "FALSE"){
+			list (coefficients = matrix(nrow=1,ncol=2))  
+		} else {
+			list( coefficients= summary(reg)$coeff)} 
+		} 
+	)
   
   if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")
@@ -103,7 +110,14 @@ if (cov == "F") {
   cov2<-read.table(cov)
   cov2<-as.matrix(cov2[,3:ncol(cov2)])
   cov2[cov2==-9]<-NA
-  assoc<-apply(sc,1, function(row) { if (var(row) == 0 || is.na(var(row)) == "TRUE" ){ list (coefficients = matrix(nrow=1,ncol=2))  } else {list( coefficients= summary(glm(phenotype ~ row + cov2,family=test_family))$coeff)} } )
+  assoc<-apply(sc,1, function(row) { 
+					reg<-glm(phenotype ~ row + cov2,family=test_family)
+					if (reg$converged == "FALSE"){
+						list (coefficients = matrix(nrow=1,ncol=2))  
+					} else {
+						list( coefficients= summary(reg)$coeff)} 
+					}
+			   )
   expected_coeff<-ncol(cov2) + 1
     if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")

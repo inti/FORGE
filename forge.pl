@@ -1308,6 +1308,7 @@ script [options]
 	-correlation, -cor	SNP-SNP correlation file
  	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
         -lambda			lambda value to correct SNP statistics, if genomic control is used
+	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
         -no_forge               Do not do a forge analysis. e.g. if only performing sample-scoring
         
         Weigthing
@@ -1400,6 +1401,10 @@ SNP_A-8389091	rs7593668
 =item B<-lambda>
 
 lambda value to correct SNP statistics, if genomic control is used
+
+=item B<-gc_correction>
+
+Correct the SNP pvalues by the genomic control method. It will calculate the lambda from the data itself. PLEASE MAKE SURE YOU DO NOT FILTER THE SNPS BEFORE RUNNING FORGE OR THE CORRECTION MAY BE ERRONEOUS.
 
 =item B<-print_cor>
 

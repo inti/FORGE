@@ -1,3 +1,4 @@
+
 header<-"N"
 test_family="binomial"
 qt="F"
@@ -38,8 +39,10 @@ n_cols_removed<-abs(nrow(m) - nrow(m2))
 sc<-m2
 cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
 
+gauss_map<-rnorm(ncol(sc))
+gauss_map<-sort(gauss_map)
 cat("Making have mean 0 and sd 1\n",sep=" ")
-sc<-apply(sc,1,function(row) (row - mean(row))/sd(row) ) # gene back in columns
+sc<-apply(sc,1,function(row) gauss_map[row] ) # gene back in columns
 sc<-t(sc) # genes in rows
 N<-nrow(sc)
 cat(N,"Genes to be analysed\n",sep=" ")
@@ -58,7 +61,7 @@ expected_coeff<-1
 perm_p<-"F"
 cat("Running GLM model for genes\n",sep=" ")
 if (cov == "F") {
-  assoc<-apply(sc,1, function(row) { list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)}  )
+  assoc<-apply(sc,1, function(row) { reg<-glm(phenotype ~ row,family=test_family); if ( is.null( warnings() ) != TRUE){ print(warnings());}; list( coefficients= summary(glm(phenotype ~ row,family=test_family))$coeff)}  )
   
   if (perm != "F"){
     cat("Going to run [",perm,"] permutations\n",sep=" ")
@@ -146,4 +149,7 @@ assoc$empi_p<-perm_p
 #assoc$gene_symbol<-as.vector(sc[,"V2"])
 cat("Writting to file [",out,"]\n",sep=" ")
 write.table(assoc,file=out,col.names=T,row.names=T,sep="\t",quote=F)
+
+cat("WARNINGS\n",sep=" ")
+print(warnings())
 cat("Done with analysis\n",sep=" ")

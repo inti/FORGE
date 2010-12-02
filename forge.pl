@@ -21,7 +21,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ss_mean, $no_forge,
+    $ss_mean, $no_forge, $gc_correction,
 );
 
 GetOptions(
@@ -42,6 +42,7 @@ GetOptions(
    'affy_to_rsid=s' => \$affy_to_rsid,
    'verbose|v' => \$v,
    'lambda=f' => \$lambda,
+   'gc_correction' => \$gc_correction,
    'print_cor' => \$print_cor,
    'pearson_genotypes' => \$pearson_genotypes,
    'distance|d=i' => \$distance, 
@@ -146,6 +147,8 @@ if ( defined $affy_to_rsid ) { # if conversion file is defined
 # Read file with genetic association results.
 print_OUT("Reading association file: [ $assoc ]");
 # create hash to store SNP information
+my $assoc_chis = [] if (defined $gc_correction);
+
 my %assoc_data = ();
 open( ASSOC, $assoc ) or print_OUT("I can not open [ $assoc ]") and exit(1);
 my $line = 0;
@@ -223,6 +226,7 @@ while (  my $a = <ASSOC> ) {
         				};
    # correct for genomic control if a lambda > 1 was specified.   
    if ($lambda == 1) {
+   	push @{ $assoc_chis }, $data[$header{"P"}];
 	$assoc_data{ $data[$header{"SNP"}] }->{'pvalue'} = $data[$header{"P"}];
    } elsif ($lambda > 1) {# transform the p-value on a chi-square, correct it by the inflation factor and transform it again on a p-value 
    	$assoc_data{ $data[$header{"SNP"}] }->{ 'pvalue' }= 1 - gsl_cdf_chisq_P( gsl_cdf_chisq_Pinv( $data[$header{"P"}], 1 )/$lambda, 1 );
@@ -238,6 +242,34 @@ if (scalar keys %assoc_data == 0){
 	exit(1);
 }
 print_OUT("[ " . scalar (keys %assoc_data) . " ] SNPs with association data");
+
+# Genomic Control adjustment
+if (defined $gc_correction){
+	print_OUT("Calculating lambda for genomic control correction");
+	my $gc_lambda = get_lambda_genomic_control($assoc_chis);
+	print_OUT("   '-> lambda (median) of [ $gc_lambda ]");
+	if ($gc_lambda > 1){
+		print_OUT("   '-> Applying GC correction");
+		my $assoc_chis = [];
+		foreach my $snp (keys %assoc_data) {
+			next if ( $assoc_data{ $snp }->{ 'pvalue' } == 1);
+			my $snp_chi = gsl_cdf_chisq_Pinv ( 1 - $assoc_data{ $snp }->{ 'pvalue' }, 1 );
+			$snp_chi /=  $gc_lambda;
+			$assoc_data{ $snp }->{ 'pvalue' }= 1 - gsl_cdf_chisq_P( $snp_chi, 1 );
+			push @{ $assoc_chis }, $assoc_data{ $snp }->{ 'pvalue' };
+		}
+		$gc_lambda = get_lambda_genomic_control($assoc_chis);
+		print_OUT("   '-> After correction the lambda is [ $gc_lambda ]");
+	} else {
+		print_OUT("   '-> GC correction not applied because lambda is less than 1");
+	}
+}
+sub get_lambda_genomic_control {
+	my $p = shift;
+	$p = double 1 - pdl $p;
+	my $chi = gsl_cdf_chisq_Pinv($p,1);
+	return $chi->median/0.456;
+}
 
 #read snp-to-gene mapping and store in a hash with key equal gene name and value
 # an array with the snps in the gene.
@@ -840,9 +872,14 @@ sub sample_score {
     }
     $snps_effect_size= pdl @{$snps_effect_size}; # make it a piddle
     # multiply the genotypes by the effect size and the weights
-    $geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
-    
+#     print $geno_mat->(1:10,),"\n";
+#     $geno_mat *= $gene->{weights}->transpose; 
+#     print $snps_effect_size->transpose*$gene->{weights}->transpose,"\n";
+#     print $geno_mat->(1:10,);
+#     getc;
     # calculate the mean of the scores for each SNP
+    
+    
     my $score_means = [];
     for my $s (0..$n_snps-1){
 	my $mean = double $geno_mat->(,$s)->davg;
@@ -862,12 +899,29 @@ sub sample_score {
     } else {
 	    my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-	    my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
+# 	    my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
 	    # standarize each sample score by the mean and variance of the distribution
-	    $sample_z = pdl map { 
-				($geno_mat->($_,)->flat->dsum - $sum_over_all_scores)/$var_covMat; 
-			} 0..$n_samples-1;
+	    my $cor = corr_table($gene->{genotypes});
+	    my $varcov_mat = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3));
+	    $sample_z = [];
+	    foreach my $person (0..$n_samples - 1){
+	    			my $w = $geno_mat->($person,)->flat + $gene->{weights}->flat;
+# 				$w = 1/$w;
+				$w /= $w->dsum;
+				if ($w->min == 0){ $w += $w->(which($w == 0))->min/$w->length; } 
+				$w /= $w->dsum;
+				my $second = $varcov_mat*$w*($w->transpose); 
+				my $var = 4*dsum($w**2) + $second->flat->dsum - $second->diagonal(0,1)->flat->dsum; 
+				my $sample_b = dsum($snps_effect_size->flat * $w->flat)/$var;
+				my $V = 1/dsum($w->flat);
+				my $sample_Xsquared_df1 = ($sample_b*$sample_b)/$V;
+	    			push @{$sample_z}, sclr gsl_cdf_chisq_P ($sample_Xsquared_df1,1.0);#dsum($snps_effect_size->flat * $w->flat)/$var;
+			} 
+	   $sample_z = pdl $sample_z;	
     }
+    $sample_z = $sample_z->qsorti;
+    $sample_z++;
+    
     # add values to output line
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
     print $out_fh_sample_score_mat "$out_line\n";

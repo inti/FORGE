@@ -30,14 +30,14 @@ perl $FORGE_PATH -bfile $BFILE \
 R --no-save --no-readline --slave \
 	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
 	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
-	out=$TMP_DIR/$OUT_TAG.sample_score.genep  < /storage/adata/FORGE/Development/FORGE/Sample_Score.R
+	out=$TMP_DIR/$OUT_TAG.sample_score.genep  < /storage/adata/FORGE/Development/FORGE/utilities/Sample_Score.R
 echo Output written to $TMP_DIR/$OUT_TAG.sample_score.genep
 
 R --no-save --no-readline --slave \
 	fam=$TMP_DIR/$OUT_TAG.sample_score.dat \
 	scores=$TMP_DIR/$OUT_TAG.sample_score.mat \
 	out=$TMP_DIR/$OUT_TAG.sample_score \
-	test_family=binomial  < /storage/adata/FORGE/Development/FORGE/run_glmnet_SampleScore.R
+	test_family=binomial  < /storage/adata/FORGE/Development/FORGE/utilities/run_glmnet_SampleScore.R
 echo Output written to $TMP_DIR/$OUT_TAG.sample_score with exentension *.variance and *.betas
 
 #mv $TMP_DIR/$1.trainning.chr$CHR.* $FINAL_DIR

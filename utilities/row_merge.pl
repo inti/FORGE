@@ -4,9 +4,6 @@ use Getopt::Long;
 use Data::Dumper;
 use Pod::Usage;
 
-my $VERSION = "0.9.5.6";
-
-
 our ( $help, $man, $out, $files, $cols,$outfile,$keep,$space);
 
 GetOptions(
@@ -64,21 +61,24 @@ print_OUT("Writting to [ $outfile ]");
 open (OUT,">$outfile") or print_OUT("Cannot open [ $outfile ] ") and exit(1);
 my @lines_out = ();
 foreach my $k (sort { $key_data{$a}->{index} <=> $key_data{$b}->{index} } keys %key_data){
-    next if ($key_data{$k}->{count} < scalar @$files);
+    if ($key_data{$k}->{count} < scalar @$files){
+	 	delete($key_data{$k});
+		next;
+	 }
     my $delim = "\t";
     if (defined $space){ $delim = " "; }
     my $ol = join $delim, map {  @{$_}  } @{ $key_data{$k}->{line} }[0..(scalar @{ $key_data{$k}->{line} }) - 1];
     $ol .= "\n";
     push @lines_out,$ol;
     
-    if (scalar @lines_out > 500){
+    if (scalar @lines_out > 1_000){
         print OUT @lines_out;
         @lines_out = ();
     }
-    
+   delete($key_data{$k}); 
 }
 print OUT @lines_out;
-
+close(OUT);
 print_OUT("Files Merged"); 
 exit;
 

@@ -39,8 +39,7 @@ n_cols_removed<-abs(nrow(m) - nrow(m2))
 sc<-m2
 cat("Removing [",n_cols_removed,"] genes because their score have variance 0 or NA\n",sep=" ")	
 
-gauss_map<-rnorm(ncol(sc))
-gauss_map<-sort(gauss_map)
+
 cat("Making have mean 0 and sd 1\n",sep=" ")
 sc<-apply(sc,1,function(row) gauss_map[row] ) # gene back in columns
 sc<-t(sc) # genes in rows

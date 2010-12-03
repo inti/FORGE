@@ -872,56 +872,28 @@ sub sample_score {
     }
     $snps_effect_size= pdl @{$snps_effect_size}; # make it a piddle
     # multiply the genotypes by the effect size and the weights
-#     print $geno_mat->(1:10,),"\n";
-#     $geno_mat *= $gene->{weights}->transpose; 
-#     print $snps_effect_size->transpose*$gene->{weights}->transpose,"\n";
-#     print $geno_mat->(1:10,);
-#     getc;
+    #$geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
+    
     # calculate the mean of the scores for each SNP
-    
-    
-    my $score_means = [];
-    for my $s (0..$n_snps-1){
-	my $mean = double $geno_mat->(,$s)->davg;
-	push @{ $score_means }, $mean;
-    }
-    $score_means = pdl $score_means; # piddle with the scores means for each SNP
+    my $score_means = dsumover $geno_mat/$geno_mat->getdim(0);
     my $sample_z = null;
-   
     if (defined $ss_mean){
 	    my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
 	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
 	    my $var_covMat = $cov->flat->dsum; # this is the variance of the test
 	    # standarize each sample score by the mean and variance of the distribution
-	    $sample_z = pdl map { 
-			($geno_mat->($_,)->flat->davg - $mean_over_all_scores)/$var_covMat; 
-		} 0..$n_samples-1;
+	    $sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
+		$sample_z -= $mean_over_all_scores;
+		$sample_z /= $var_covMat;
     } else {
-	    my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
-	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-# 	    my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
-	    # standarize each sample score by the mean and variance of the distribution
-	    my $cor = corr_table($gene->{genotypes});
-	    my $varcov_mat = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3));
-	    $sample_z = [];
-	    foreach my $person (0..$n_samples - 1){
-	    			my $w = $geno_mat->($person,)->flat + $gene->{weights}->flat;
-# 				$w = 1/$w;
-				$w /= $w->dsum;
-				if ($w->min == 0){ $w += $w->(which($w == 0))->min/$w->length; } 
-				$w /= $w->dsum;
-				my $second = $varcov_mat*$w*($w->transpose); 
-				my $var = 4*dsum($w**2) + $second->flat->dsum - $second->diagonal(0,1)->flat->dsum; 
-				my $sample_b = dsum($snps_effect_size->flat * $w->flat)/$var;
-				my $V = 1/dsum($w->flat);
-				my $sample_Xsquared_df1 = ($sample_b*$sample_b)/$V;
-	    			push @{$sample_z}, sclr gsl_cdf_chisq_P ($sample_Xsquared_df1,1.0);#dsum($snps_effect_size->flat * $w->flat)/$var;
-			} 
-	   $sample_z = pdl $sample_z;	
+		my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
+		my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
+		my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
+		$sample_z = dsumover $geno_mat->xchg(0,1);
+		$sample_z -= $sum_over_all_scores;
+		$sample_z /= $var_covMat;
     }
-    $sample_z = $sample_z->qsorti;
-    $sample_z++;
-    
+	
     # add values to output line
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
     print $out_fh_sample_score_mat "$out_line\n";
@@ -1308,6 +1280,7 @@ script [options]
 	-correlation, -cor	SNP-SNP correlation file
  	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
         -lambda			lambda value to correct SNP statistics, if genomic control is used
+	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
         -no_forge               Do not do a forge analysis. e.g. if only performing sample-scoring
         
         Weigthing
@@ -1400,6 +1373,10 @@ SNP_A-8389091	rs7593668
 =item B<-lambda>
 
 lambda value to correct SNP statistics, if genomic control is used
+
+=item B<-gc_correction>
+
+Correct the SNP pvalues by the genomic control method. It will calculate the lambda from the data itself. PLEASE MAKE SURE YOU DO NOT FILTER THE SNPS BEFORE RUNNING FORGE OR THE CORRECTION MAY BE ERRONEOUS.
 
 =item B<-print_cor>
 

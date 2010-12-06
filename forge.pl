@@ -21,7 +21,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ss_mean, $no_forge, $gc_correction,
+    $ss_mean, $no_forge, $gc_correction,$g_prob_threshold
 );
 
 GetOptions(
@@ -50,6 +50,7 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
+   'g_prob_threshold=f' => \$g_prob_threshold,
    'weight_by_maf|w_maf' => \$w_maf,
    'ss_mean' => \$ss_mean,
    'no_forge' => \$no_forge,
@@ -72,6 +73,8 @@ defined $report or $report = 50_000;
 defined $analysis_chr and print_OUT("Restricting analysis to chromosome [ $analysis_chr ]");
 #  defined lambda value for Genomic Control correction
 defined $lambda or $lambda = 1;
+# defined threshold value for genotype probabilities
+defined $g_prob_threshold or $g_prob_threshold = 1.0;
 # tell if user wants to print the *.correlation file 
 defined $print_cor and print_OUT("Defined -print_cor: I will print the *.correlation file (it is bulky)");
 #set output file if not set already.
@@ -80,13 +83,13 @@ defined $out or $out = "gene_based_fisher_v041.OUT";
 if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]");}
 
 my $geno_probs = undef;
-if (defined $ox_gprobs and defined $sample_score) {
+if (defined $ox_gprobs) {
     $geno_probs = $ox_gprobs ;
     print_OUT("Genotype probabilities in OXFORD format will be read from [ $geno_probs ]");
 }
 
 my ($gprobs, $gprobs_index);
-if (defined $geno_probs and defined $sample_score){
+if (defined $geno_probs){
     $gprobs = IO::File->new();
     $gprobs_index = IO::File->new();
     
@@ -280,7 +283,11 @@ if (defined $bfile) {
   ($fam_ref,$ped_map_genotypes,$bim_ref) = read_map_and_ped($ped,$map);
   @fam = @$fam_ref;
   @bim = @$bim_ref;
+} elsif (defined $geno_probs){
+	print "Getting SNP list from gprobs file\n";
+	@bim = @{ get_genotypes_from_ox_format($gprobs, $gprobs_index) };
 }
+
 my %bim_ids = ();
 my $index = 0;
 map {
@@ -556,6 +563,39 @@ if (defined $bfile) {
       }
     }
   }
+} elsif (defined $geno_probs) { # in case not plink binary files provided and only a genotype prob file is given
+	print_OUT("Reading genotype probabilities from [ $geno_probs ]");
+	foreach my $gn (keys %gene){
+		my $snp_list = [];
+		my $lines = [];
+		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
+			next if (not exists $assoc_data{ $bim[$bim_ids{$mapped_snp}]->{snp_id} } );
+			if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn"); }
+			push @{$snp_list}, $mapped_snp;
+			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
+			push @{$lines}, $bim_ids{$mapped_snp} + 1;
+		}
+		($gene{$gn}->{genotypes},$gene{$gn}->{cor}) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold);
+		# Calculate the weights for the gene
+		if (defined @weights_file){
+			$gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
+		} else {
+			my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
+			$gene{$gn}->{weights} = ones $n_snps;
+			$gene{$gn}->{weights} *= 1/$n_snps;
+			$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+		}
+		
+		# calculate gene p-values
+		&gene_pvalue($gn) if (not defined $no_forge);
+		&sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+		
+		# delete the gene's data to keep memory usage low
+		delete($gene{$gn});
+		$count++;
+		&report_advance($count,$report,"Genes");	
+		
+	}
 }else {
   print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness");
 }
@@ -575,7 +615,37 @@ if (defined $print_cor){
 }
 print_OUT("Well Done!!");
 exit(0);
-
+sub extract_genotypes_for_snp_list{
+	my $snp_list = shift;
+	my $line_index = shift;
+	my $g_prob_threshold = shift;
+	my @geno_probs = ();
+	# loop over the snps mapped to the gene
+	for (my $i = 0; $i < scalar @$snp_list; $i++){
+		my $line = line_with_index($gprobs, $gprobs_index, $line_index->[$i]);
+		
+		my @genos = split(/[\t+\s+]/,$line);
+		# now loop over all samples for this snps
+		my $sample_counter = 0;
+		
+		# counter start from 5 because the first columns are chromosome, SNP id, position, minor allele and major allele
+		# counter increases by three because each sample has 3 genotype probabilities for the AA, AB and BB, with A the minor allele
+		for (my $g = 5; $g < scalar @genos; $g +=3){
+			my $snp_prob = pdl @genos[$g..$g+2];
+			my $value = undef;
+			if (($snp_prob->dsum == 0) or ($snp_prob->(maximum_ind($snp_prob)) < $g_prob_threshold)){
+				$value = 0;
+			} else {
+				$value = 1 + maximum_ind($snp_prob);
+			}
+			push @{ $geno_probs[$sample_counter] } , $value;
+			$sample_counter++;
+		}			
+	}
+	my $mat = double mpdl @geno_probs;	
+	my $c = corr_table($mat);
+	return($mat,$c);
+}
 sub generate_weights_for_a_gene {
     my $snps = shift;
     my $weights = shift;
@@ -643,6 +713,29 @@ sub line_with_index {
     $d_offset = unpack("N", $entry);
     seek($data_file, $d_offset, 0);
     return scalar(<$data_file>);
+sub get_genotypes_from_ox_format {
+	my $geno_probs = shift;
+	my $geno_probs_index = shift;
+	my $index = 0;
+	my @back = ();
+	my $desired_line = 1;
+	my $eof = 0;
+	while () {
+		my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
+		last if ($line eq '1');
+		my ($chr,$snp,$pos,$a1,$a2) = split(/\s+/,$line);
+		push @back,{
+			'snp_id' => $snp,
+			'chr'    => $chr,
+			'cm'     => 0,
+			'pos'    => $pos,
+			'a2'     => $a1,
+			'a1'     => $a2,
+        };
+		$desired_line++;
+	}
+	print_OUT("[ " .  scalar @back . " ] SNPs on BED file");
+	return ( \@back );
 }
 
 sub extract_binary_genotypes {
@@ -780,8 +873,8 @@ sub sample_score {
     if (defined $geno_probs){
         my $snp_counter = 0;
         my @geno_probs = (); 
-	# go over each snps
-	foreach my $snp (@snp_info){
+		# go over each snps
+		foreach my $snp (@snp_info){
             # use the index in teh bim or map file to find the line in the genotype prob file
             # my index starts from 0 but the lines in the file from, 1 so add 1
             my $desired_line = $snp_index->{$snp->{id}} + 1;
@@ -807,8 +900,8 @@ sub sample_score {
             if (not defined $line){ print_OUT("Trying to fetch line out of range in sample score analysis. Line [ $desired_line ] was requested.") and exit(1); }
             $snp_counter++;
         }
-	my $prob_mat = double mpdl @geno_probs ;
-	$geno_mat *= $prob_mat;   
+		my $prob_mat = double mpdl @geno_probs ;
+		$geno_mat *= $prob_mat;   
     }
     
     # store the SNP effect sizefor the minor allele

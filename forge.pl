@@ -621,25 +621,24 @@ sub extract_genotypes_for_snp_list{
 	my @geno_probs = ();
 	# loop over the snps mapped to the gene
 	for (my $i = 0; $i < scalar @$snp_list; $i++){
-		my $line = line_with_index($gprobs, $gprobs_index, $line_index->[$i]);
-		
+		my $line = line_with_index($gprobs, $gprobs_index, $line_index->[$i]);		
 		my @genos = split(/[\t+\s+]/,$line);
 		# now loop over all samples for this snps
 		my $sample_counter = 0;
-		
 		# counter start from 5 because the first columns are chromosome, SNP id, position, minor allele and major allele
 		# counter increases by three because each sample has 3 genotype probabilities for the AA, AB and BB, with A the minor allele
 		for (my $g = 5; $g < scalar @genos; $g +=3){
 			my $snp_prob = pdl @genos[$g..$g+2];
+			my $max_index = maximum_ind($snp_prob);
 			my $value = undef;
-			if (($snp_prob->dsum == 0) or ($snp_prob->(maximum_ind($snp_prob)) < $g_prob_threshold)){
+			if (($snp_prob->dsum == 0) or ($snp_prob->($max_index) < $g_prob_threshold)){
 				$value = 0;
 			} else {
-				$value = 1 + maximum_ind($snp_prob);
+				$value = sclr (1 + $max_index)*$snp_prob->($max_index);
 			}
-			push @{ $geno_probs[$sample_counter] } , $value;
+			push @{ $geno_probs[$sample_counter] } , sclr $value;
 			$sample_counter++;
-		}			
+		}
 	}
 	my $mat = double mpdl @geno_probs;	
 	my $c = corr_table($mat);

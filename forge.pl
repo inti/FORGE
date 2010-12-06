@@ -654,7 +654,7 @@ sub extract_genotypes_for_snp_list{
 				$hard_coded = 0;
 			} else {
 				$value = $snp_prob->($max_index);
-				$hard_coded = (1 + $max_index);
+				$hard_coded = 2*$snp_prob->(0) + 1*$snp_prob->(1) + 0*$snp_prob->(2);
 			}
 			push @{ $geno_probs[$sample_counter] } , sclr $value;
 			push @{ $geno_hard_coded[$sample_counter] }, sclr $hard_coded;

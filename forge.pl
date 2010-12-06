@@ -21,7 +21,8 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ss_mean, $no_forge, $gc_correction,$g_prob_threshold
+    $ss_mean, $no_forge, $gc_correction,$g_prob_threshold,
+	$bgl_gprobs
 );
 
 GetOptions(
@@ -50,6 +51,7 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
+   'bgl_gprobs=s' => \$bgl_gprobs,
    'g_prob_threshold=f' => \$g_prob_threshold,
    'weight_by_maf|w_maf' => \$w_maf,
    'ss_mean' => \$ss_mean,
@@ -83,9 +85,15 @@ defined $out or $out = "gene_based_fisher_v041.OUT";
 if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]");}
 
 my $geno_probs = undef;
+my $geno_probs_format = undef;
 if (defined $ox_gprobs) {
     $geno_probs = $ox_gprobs ;
+	$geno_probs_format = 'OXFORD';
     print_OUT("Genotype probabilities in OXFORD format will be read from [ $geno_probs ]");
+} elsif (defined $bgl_gprobs) {
+    $geno_probs = $bgl_gprobs ;
+	$geno_probs_format = 'BEAGLE';
+    print_OUT("Genotype probabilities in BEAGLE format will be read from [ $geno_probs ]");
 }
 
 my ($gprobs, $gprobs_index);
@@ -285,7 +293,8 @@ if (defined $bfile) {
   @bim = @$bim_ref;
 } elsif (defined $geno_probs){
 	print "Getting SNP list from gprobs file\n";
-	@bim = @{ get_genotypes_from_ox_format($gprobs, $gprobs_index) };
+	@bim = @{ get_genotypes_from_ox_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'OXFORD');
+	@bim = @{ get_genotypes_from_bgl_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'BEAGLE');
 }
 
 my %bim_ids = ();
@@ -476,7 +485,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
 			push @{$lines}, $bim_ids{$mapped_snp} + 1;
 		}
-		my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold);
+		my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold,$geno_probs_format);
 		$gene{$gn}->{genotypes} = $d_mat;
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
 		# Calculate the weights for the gene
@@ -590,7 +599,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
         }
 		if (defined $geno_probs){
 			my @lines = map { $bim_ids{$_} + 1 } @{$gene{$gn}->{geno_mat_rows}}; 
-			my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($gene{$gn}->{geno_mat_rows},\@lines,$g_prob_threshold);
+			my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($gene{$gn}->{geno_mat_rows},\@lines,$g_prob_threshold,$geno_probs_format);
 			$gene{$gn}->{genotypes} *=$p_mat;
 		}
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
@@ -631,6 +640,7 @@ sub extract_genotypes_for_snp_list{
 	my $snp_list = shift;
 	my $line_index = shift;
 	my $g_prob_threshold = shift;
+	my $geno_probs_format = shift; 
 	my @geno_probs = ();
 	my @geno_hard_coded = ();
 	# loop over the snps mapped to the gene
@@ -641,7 +651,10 @@ sub extract_genotypes_for_snp_list{
 		my $sample_counter = 0;
 		# counter start from 5 because the first columns are chromosome, SNP id, position, minor allele and major allele
 		# counter increases by three because each sample has 3 genotype probabilities for the AA, AB and BB, with A the minor allele
-		for (my $g = 5; $g < scalar @genos; $g +=3){
+		my $start_index = 0;
+		$start_index = 5 if ($geno_probs_format eq 'OXFORD');
+		$start_index = 3 if ($geno_probs_format eq 'BEAGLE');
+		for (my $g = $start_index; $g < scalar @genos; $g +=3){
 			my $snp_prob = pdl @genos[$g..$g+2];
 			my $max_index = maximum_ind($snp_prob);
 			my $value = undef;
@@ -735,6 +748,30 @@ sub line_with_index {
 		return scalar(<$data_file>);
 	}
 }
+sub get_genotypes_from_bgl_format {
+	my $geno_probs = shift;
+	my $geno_probs_index = shift;
+	my $index = 0;
+	my @back = ();
+	my $desired_line = 1;
+	my $eof = 0;
+	while () {
+		my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
+		last if ($line eq '1');
+		my ($snp,$a1,$a2) = split(/\s+/,$line);
+		push @back,{
+			'snp_id' => $snp,
+			'chr'    => 0,
+			'cm'     => 0,
+			'pos'    => 0,
+			'a2'     => $a1,
+			'a1'     => $a2,
+        };
+		$desired_line++;
+	}
+	print_OUT("[ " .  scalar @back . " ] SNPs on BEAGLE format genotype probability file");
+	return ( \@back );
+}
 
 sub get_genotypes_from_ox_format {
 	my $geno_probs = shift;
@@ -757,7 +794,7 @@ sub get_genotypes_from_ox_format {
         };
 		$desired_line++;
 	}
-	print_OUT("[ " .  scalar @back . " ] SNPs on BED file");
+	print_OUT("[ " .  scalar @back . " ] SNPs on OXFORD format genotype probability file");
 	return ( \@back );
 }
 

@@ -521,7 +521,7 @@ if (defined $bfile) {
     }
     # calculate gene p-values
     &gene_pvalue($gn) if (not defined $no_forge);
-    &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+    &sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 
     # delete the gene's data to keep memory usage low
     delete($gene{$gn});
@@ -551,7 +551,7 @@ if (defined $bfile) {
             $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
         }
 	  &gene_pvalue($gn) if (not defined $no_forge);
-      &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+      &sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 	  delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 	  unless (scalar keys %gene < 100){
@@ -587,7 +587,7 @@ if (defined $bfile) {
 		
 		# calculate gene p-values
 		&gene_pvalue($gn) if (not defined $no_forge);
-		&sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+		&sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 		
 		# delete the gene's data to keep memory usage low
 		delete($gene{$gn});
@@ -859,10 +859,7 @@ sub gene_pvalue {
 sub sample_score {
     my $gene = shift; # pseudohash with gene information
     my $assoc = shift; # ref to a hash
-    my $snp_index = shift; # index of SNPs in genptype file
-    my $geno_probs = shift; # file handel for file with genotype probabilities.
-    my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
-    
+   
     # alleles have been coded as 1 : homozygote 1/1 minor allele, 2 heterozygous, 3: homozygote 2/2 major allele and 0: missing.
     
     if (not defined $gene ){ return(0); }
@@ -871,44 +868,7 @@ sub sample_score {
     my $index = 0;
     # get snps info
     my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
-    # counter to index the snps
-    # array to store the genotype probs of each sample
-    # each element in the array will a ref to an array which contains the prob for each snp for this sample
-    my @sample_geno_prob = ();
-    if (defined $geno_probs){
-        my $snp_counter = 0;
-        my @geno_probs = (); 
-		# go over each snps
-		foreach my $snp (@snp_info){
-            # use the index in teh bim or map file to find the line in the genotype prob file
-            # my index starts from 0 but the lines in the file from, 1 so add 1
-            my $desired_line = $snp_index->{$snp->{id}} + 1;
-            # get the line. line has information for 1 SNP and all Samples
-            my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
-            # split the information in the line
-            my @genos = split(/[\t+\s+]/,$line);
-            # now loop over all samples for this snps
-            my $sample_counter = 0;
-            # counter start from 5 because the first columns are chromosome, SNP id, position, minor allele and major allele
-            # counter increases by three because each sample has 3 genotype probabilities for the AA, AB and BB, with A the minor allele
-            for (my $g = 5; $g < scalar @genos; $g +=3){
-                # if the genotype is missing. set its probability to 0
-                # otherwise get prob index is $g (the start for the genotype is the sample) + the count of minor alleles
-                if ($geno_mat->($sample_counter,$snp_counter)->sclr == 0){
-			push @{ $geno_probs[$sample_counter] } , 0;
-                } else { 
-                    my $index = $g + $geno_mat->($sample_counter,$snp_counter)->sclr - 1; # -1 because my count of minor allales is shifted by 1
-		    push @{$geno_probs[$sample_counter]} , $genos[$index];
-                }
-                $sample_counter++;
-            }
-            if (not defined $line){ print_OUT("Trying to fetch line out of range in sample score analysis. Line [ $desired_line ] was requested.") and exit(1); }
-            $snp_counter++;
-        }
-		my $prob_mat = double mpdl @geno_probs ;
-		$geno_mat *= $prob_mat;   
-    }
-    
+   
     # store the SNP effect sizefor the minor allele
     my $snps_effect_size = [];
     foreach my $snp_info (@snp_info){

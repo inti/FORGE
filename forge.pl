@@ -264,12 +264,7 @@ if (defined $gc_correction){
 		print_OUT("   '-> GC correction not applied because lambda is less than 1");
 	}
 }
-sub get_lambda_genomic_control {
-	my $p = shift;
-	$p = double 1 - pdl $p;
-	my $chi = gsl_cdf_chisq_Pinv($p,1);
-	return $chi->median/0.456;
-}
+
 
 #read snp-to-gene mapping and store in a hash with key equal gene name and value
 # an array with the snps in the gene.
@@ -1115,6 +1110,12 @@ sub read_map_and_ped {
 	return(\@back_fam, \@back_genotypes,\@bim);
 }
 
+sub get_lambda_genomic_control {
+	my $p = shift;
+	$p = double 1 - pdl $p;
+	my $chi = gsl_cdf_chisq_Pinv($p,1);
+	return $chi->median/0.456;
+}
 
 sub pearson_corr_genotypes {
   # implemented as in S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).

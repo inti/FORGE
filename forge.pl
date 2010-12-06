@@ -304,6 +304,7 @@ while ( my $read = <MAP> ) {
       	'minp'      => -9,
       	'genotypes' => null,
       	'geno_mat_rows' => [],
+	'cor' => null,
         'weights' => null,
 	'pvalues' => [],
 	'gene_status' => $gene_status,
@@ -677,12 +678,12 @@ sub gene_pvalue {
    if (defined $v){ print_OUT("Calculating correlation matrix for $n_snps SNPs with association data"); }
    # initialize correlation matrix with zeroes
    
-   my $cor = corr_table($gene{$gn}->{genotypes});
+   $gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
    
-   if (defined $v){ print_OUT($cor);}
+   if (defined $v){ print_OUT($gene{$gn}->{cor});}
    if (defined $v){ print_OUT("Calculating effective number of tests: "); }
    # calculate number of effective tests by the Gao ($k) and Galwey ($Meff_galwey) method.	  
-   my ($k,$Meff_galwey) = number_effective_tests(\$cor);
+   my ($k,$Meff_galwey) = number_effective_tests(\$gene{$gn}->{cor});
 
    # get the log of the SNP p-value
    $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
@@ -714,13 +715,13 @@ sub gene_pvalue {
     # weights reflect the correlation pattern of the SNPs 
     # weights reflect the correlation pattern of the SNPs
 
-    my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
+    my $w_matrix = $gene{$gn}->{weights}*abs($gene{$gn}->{cor}); # multiply the weights by the correaltions
     my @dims = $w_matrix->dims();
     $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
     if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
     $w_matrix /= $w_matrix->sum; # make sure weights sum 1
     $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
-   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
+   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    

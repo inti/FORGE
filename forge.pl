@@ -322,7 +322,7 @@ while ( my $read = <MAP> ) {
    # create a pseudo-hash with the gene info
    $gene{$ensembl} = {
       	'hugo'      => $hugo,
-	'ensembl'   => $ensembl,	
+		'ensembl'   => $ensembl,	
       	'chr'       => $chr,
       	'start'     => $start,
       	'end'       => $end,
@@ -331,11 +331,11 @@ while ( my $read = <MAP> ) {
       	'minp'      => -9,
       	'genotypes' => null,
       	'geno_mat_rows' => [],
-	'cor' => null,
+		'cor' => null,
         'weights' => null,
-	'pvalues' => [],
-	'gene_status' => $gene_status,
-	'desc' => $description,
+		'pvalues' => [],
+		'gene_status' => $gene_status,
+		'desc' => $description,
    };
 
    # go over mapped snps and change convert affy ids to rsid.
@@ -502,6 +502,8 @@ if (defined $bfile) {
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
+	# Calculate the genotypes correlation matrix
+	$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
     # Calculate the weights for the gene
     if (defined @weights_file){
         $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
@@ -543,7 +545,7 @@ if (defined $bfile) {
             $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
         }
 	  &gene_pvalue($gn) if (not defined $no_forge);
-          &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
+      &sample_score($gene{$gn},\%assoc_data,\%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
 	  delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 	  unless (scalar keys %gene < 100){
@@ -701,11 +703,6 @@ sub gene_pvalue {
         print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
         exit(1);
     }
-   
-   if (defined $v){ print_OUT("Calculating correlation matrix for $n_snps SNPs with association data"); }
-   # initialize correlation matrix with zeroes
-   
-   $gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
    
    if (defined $v){ print_OUT($gene{$gn}->{cor});}
    if (defined $v){ print_OUT("Calculating effective number of tests: "); }

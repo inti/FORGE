@@ -295,7 +295,6 @@ map {
   $index++;
 } @bim;
 
-
 print_OUT("Reading gene to SNP mapping file from [ $snpmap ]");
 
 open( MAP, $snpmap ) or print_OUT("Can not open [ $snpmap ] file") and exit(1);
@@ -711,8 +710,14 @@ sub line_with_index {
     seek($index_file, $i_offset, 0) or return;
     read($index_file, $entry, $size);
     $d_offset = unpack("N", $entry);
-    seek($data_file, $d_offset, 0);
-    return scalar(<$data_file>);
+	if (not defined $d_offset){
+		return('1');
+	} else {
+		seek($data_file, $d_offset, 0);
+		return scalar(<$data_file>);
+	}
+}
+
 sub get_genotypes_from_ox_format {
 	my $geno_probs = shift;
 	my $geno_probs_index = shift;

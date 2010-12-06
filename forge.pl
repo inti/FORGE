@@ -508,9 +508,16 @@ if (defined $bfile) {
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
-	# Calculate the genotypes correlation matrix
-	$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
-    # Calculate the weights for the gene
+	  if (defined $geno_probs){
+		  my @lines = map { $bim_ids{$_} + 1 } @{$gene{$gn}->{geno_mat_rows}}; 
+		  my ($p_mat,$g_mat) = extract_genotypes_for_snp_list($gene{$gn}->{geno_mat_rows},\@lines,$g_prob_threshold);
+		  $gene{$gn}->{genotypes} *=$p_mat;
+	  }
+	  # Calculate the genotypes correlation matrix
+	  $gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+	  
+	  
+	  # Calculate the weights for the gene
     if (defined @weights_file){
         $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
     } else {
@@ -550,6 +557,13 @@ if (defined $bfile) {
             $gene{$gn}->{weights} *= 1/$n_snps;
             $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
         }
+		if (defined $geno_probs){
+			my @lines = map { $bim_ids{$_} + 1 } @{$gene{$gn}->{geno_mat_rows}}; 
+			my ($p_mat,$g_mat) = extract_genotypes_for_snp_list($gene{$gn}->{geno_mat_rows},\@lines,$g_prob_threshold);
+			$gene{$gn}->{genotypes} *=$p_mat;
+		}
+		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+			
 	  &gene_pvalue($gn) if (not defined $no_forge);
       &sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 	  delete($gene{$gn});
@@ -574,7 +588,9 @@ if (defined $bfile) {
 			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
 			push @{$lines}, $bim_ids{$mapped_snp} + 1;
 		}
-		($gene{$gn}->{genotypes},$gene{$gn}->{cor}) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold);
+		my ($p_mat,$g_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold);
+		$gene{$gn}->{genotypes} = $g_mat*$p_mat;
+		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
 		# Calculate the weights for the gene
 		if (defined @weights_file){
 			$gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
@@ -619,6 +635,7 @@ sub extract_genotypes_for_snp_list{
 	my $line_index = shift;
 	my $g_prob_threshold = shift;
 	my @geno_probs = ();
+	my @geno_hard_coded = ();
 	# loop over the snps mapped to the gene
 	for (my $i = 0; $i < scalar @$snp_list; $i++){
 		my $line = line_with_index($gprobs, $gprobs_index, $line_index->[$i]);		
@@ -631,18 +648,22 @@ sub extract_genotypes_for_snp_list{
 			my $snp_prob = pdl @genos[$g..$g+2];
 			my $max_index = maximum_ind($snp_prob);
 			my $value = undef;
+			my $hard_coded = undef;
 			if (($snp_prob->dsum == 0) or ($snp_prob->($max_index) < $g_prob_threshold)){
 				$value = 0;
+				$hard_coded = 0;
 			} else {
-				$value = sclr (1 + $max_index)*$snp_prob->($max_index);
+				$value = $snp_prob->($max_index);
+				$hard_coded = (1 + $max_index);
 			}
 			push @{ $geno_probs[$sample_counter] } , sclr $value;
+			push @{ $geno_hard_coded[$sample_counter] }, sclr $hard_coded;
 			$sample_counter++;
 		}
 	}
-	my $mat = double mpdl @geno_probs;	
-	my $c = corr_table($mat);
-	return($mat,$c);
+	my $coded_mat = double mpdl @geno_hard_coded;
+	my $prob_mat = double mpdl @geno_probs;	
+	return($prob_mat,$coded_mat);
 }
 sub generate_weights_for_a_gene {
     my $snps = shift;
@@ -858,7 +879,9 @@ sub gene_pvalue {
 sub sample_score {
     my $gene = shift; # pseudohash with gene information
     my $assoc = shift; # ref to a hash
-   
+	print join " ",$gene->{genotypes}->dims,"\n";
+	print $gene->{genotypes}->(1:5,1:5);
+	getc;
     # alleles have been coded as 1 : homozygote 1/1 minor allele, 2 heterozygous, 3: homozygote 2/2 major allele and 0: missing.
     
     if (not defined $gene ){ return(0); }

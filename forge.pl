@@ -336,6 +336,7 @@ while ( my $read = <MAP> ) {
       	'minp'      => -9,
       	'genotypes' => null,
       	'geno_mat_rows' => [],
+	'cor' => null,
         'weights' => null,
 	'pvalues' => [],
 	'gene_status' => $gene_status,
@@ -708,56 +709,13 @@ sub gene_pvalue {
    
    if (defined $v){ print_OUT("Calculating correlation matrix for $n_snps SNPs with association data"); }
    # initialize correlation matrix with zeroes
-   my $cor = zeroes $n_snps,$n_snps;
-   # set equal weight to all SNPs
-   # initialize the second term for the variance of the statistics  for the Makambi method
-   # loop over all pairs of SNPs and get their correlation values
-   for ( my $i = 0; $i < $n_snps; $i++){
-      for ( my $p = $i; $p < $n_snps; $p++){
-	 # if the correlation is known
-	 if (defined $v){ print_OUT("working in $i:$gene{$gn}->{geno_mat_rows}->[$i]; $p:$gene{$gn}->{geno_mat_rows}->[$p]"); }
-	  # if is it a self correlation then don't calculate anything
-	 if ($gene{$gn}->{geno_mat_rows}->[$p] eq  $gene{$gn}->{geno_mat_rows}->[$i]){
-	    set $cor, $i, $p, 1;
-            set $cor, $p, $i, 1;
-	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = 1;
-	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = 1;
-	    next;
-	 }
-	 # if the correlation is stored in the %correlation hash then fetch the value
-	 if (exists $correlation{ $gene{$gn}->{geno_mat_rows}->[$p] }{ $gene{$gn}->{geno_mat_rows}->[$i] } ){
-	    	my $c = $correlation{ $gene{$gn}->{geno_mat_rows}->[$p] }{ $gene{$gn}->{geno_mat_rows}->[$i] };
-	    	set $cor, $i, $p, $c;
-		set $cor, $p, $i, $c;
-      	} else { 
-		# if the user did not provided a genotype file and tell that this pair of SNPs does not have a correlation value
-		unless ((defined $bfile) or (defined $ped)){print_OUT(" WARNING: this pair of snps does not have a correlation value: [$gn => $gene{$gn}->{snps}->[$p] ] and [ $gene{$gn}->{snps}->[$i] ]"); }
-		# compute the correlation
-		#my $c = "";
-		#if (defined $pearson_genotypes) { # if requested used the Pearson correlation for genotypes
-		#  $c = pearson_corr_genotypes([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		#} else { # by default use the spearman rank correlation
-		  #my $d = Statistics::RankCorrelation->new([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		  #$c = $d->spearman;
-                  my $a = $gene{$gn}->{genotypes}->(,$i)->flat->copy;
-                  $a->inplace->setvaltobad( 0 );
-                  my $b = $gene{$gn}->{genotypes}->(,$p)->flat->copy;
-                  $b->inplace->setvaltobad( 0 );
-                  my ($c) = $a->corr($b)->list;
- 		#}
- 		set $cor, $i,$p, $c;
-		set $cor, $p,$i, $c;
-		# increase the second term of the Makambi method
-		# store the correlation value in case is needed later.
-		$correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = $c;
-		$correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = $c;
-      }
-    }
-  }
-   if (defined $v){ print_OUT($cor);}
+   
+   $gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+   
+   if (defined $v){ print_OUT($gene{$gn}->{cor});}
    if (defined $v){ print_OUT("Calculating effective number of tests: "); }
    # calculate number of effective tests by the Gao ($k) and Galwey ($Meff_galwey) method.	  
-   my ($k,$Meff_galwey) = number_effective_tests(\$cor);
+   my ($k,$Meff_galwey) = number_effective_tests(\$gene{$gn}->{cor});
 
    # get the log of the SNP p-value
    $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
@@ -789,13 +747,13 @@ sub gene_pvalue {
     # weights reflect the correlation pattern of the SNPs 
     # weights reflect the correlation pattern of the SNPs
 
-    my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
+    my $w_matrix = $gene{$gn}->{weights}*abs($gene{$gn}->{cor}); # multiply the weights by the correaltions
     my @dims = $w_matrix->dims();
     $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
     if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
     $w_matrix /= $w_matrix->sum; # make sure weights sum 1
     $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
-   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
+   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
@@ -878,20 +836,20 @@ sub sample_score {
     my $score_means = dsumover $geno_mat/$geno_mat->getdim(0);
     my $sample_z = null;
     if (defined $ss_mean){
-	    my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
-	    my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-	    my $var_covMat = $cov->flat->dsum; # this is the variance of the test
-	    # standarize each sample score by the mean and variance of the distribution
-	    $sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
-		$sample_z -= $mean_over_all_scores;
-		$sample_z /= $var_covMat;
+	my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
+	my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
+	my $var_covMat = $cov->flat->dsum; # this is the variance of the test
+	# standarize each sample score by the mean and variance of the distribution
+	$sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
+	$sample_z -= $mean_over_all_scores;
+	$sample_z /= $var_covMat;
     } else {
-		my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
-		my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-		my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
-		$sample_z = dsumover $geno_mat->xchg(0,1);
-		$sample_z -= $sum_over_all_scores;
-		$sample_z /= $var_covMat;
+	my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
+	my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
+	my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
+	$sample_z = dsumover $geno_mat->xchg(0,1);
+	$sample_z -= $sum_over_all_scores;
+	$sample_z /= $var_covMat;
     }
 	
     # add values to output line

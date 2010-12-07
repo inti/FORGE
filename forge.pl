@@ -22,7 +22,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
     $ss_mean, $no_forge, $gc_correction,$g_prob_threshold,
-	$bgl_gprobs
+	$bgl_gprobs, $flush
 );
 
 GetOptions(
@@ -56,6 +56,7 @@ GetOptions(
    'weight_by_maf|w_maf' => \$w_maf,
    'ss_mean' => \$ss_mean,
    'no_forge' => \$no_forge,
+   'flush=i' => \$flush,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -64,6 +65,9 @@ pod2usage(0) if (not defined $assoc);
 open (LOG,">$out.log") or print_OUT("I can not open [ $out.log ] to write to") and exit(1);
 print_OUT("FORGE version [ $VERSION ]. See http://github.com/inti for updates");
 print_OUT("LOG file will be written to [ $out.log ]");
+
+# define distance threshold,
+defined $flush or $flush = 1000;
 
 # define distance threshold,
 defined $distance or $distance = 20;
@@ -472,6 +476,12 @@ print_OUT("Starting to Calculate gene p-values");
 unless (scalar keys %gene < 100){
   $report = int((scalar keys %gene)/100 + 0.5)*10;
 }
+# define array to store the output lines.
+# this allows to writte into this in chucks instead of line-by-line to speed up and 
+# avoid IO bottlenecks
+# 1 array for each analysis output will be define
+my @LINES_OUT_SS = ();
+
 # if user defined a genotypes file. read genotypes and store a genotype matrix (rows: samples, cols: genotypes)for each gene 
 if (defined $geno_probs) { # in case not plink binary files provided and only a genotype prob file is given
 	print_OUT("Reading genotype probabilities from [ $geno_probs ]");
@@ -500,7 +510,12 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		
 		# calculate gene p-values
 		&gene_pvalue($gn) if (not defined $no_forge);
-		&sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
+		push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
+		
+		if (scalar @LINES_OUT_SS > $flush){
+			print $out_fh_sample_score_mat @LINES_OUT_SS;
+			@LINES_OUT_SS = ();
+		}
 		
 		# delete the gene's data to keep memory usage low
 		delete($gene{$gn});
@@ -568,8 +583,13 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
     }
     # calculate gene p-values
     &gene_pvalue($gn) if (not defined $no_forge);
-    &sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
+    push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 
+	if (scalar @LINES_OUT_SS > $flush){
+		print $out_fh_sample_score_mat @LINES_OUT_SS;
+		@LINES_OUT_SS = ();
+	}
+	  
     # delete the gene's data to keep memory usage low
     delete($gene{$gn});
     $count++;
@@ -605,8 +625,12 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
 			
 	  &gene_pvalue($gn) if (not defined $no_forge);
-      &sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
-	  delete($gene{$gn});
+      push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
+	if (scalar @LINES_OUT_SS > $flush){
+		print $out_fh_sample_score_mat @LINES_OUT_SS;
+		@LINES_OUT_SS = ();
+	}
+	delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 	  unless (scalar keys %gene < 100){
 	    my $report = int((scalar keys %gene)/100 + 0.5)*10;
@@ -620,7 +644,16 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 }else {
   print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness");
 }
- 
+
+
+# print out the remaining output lines
+if (scalar @LINES_OUT_SS > 0){
+	print $out_fh_sample_score_mat @LINES_OUT_SS;
+	@LINES_OUT_SS = ();
+}
+
+
+
 $out_fh_sample_score_mat->close() if (defined $sample_score);
 # if the user want to get the correlation values print the *.correlation file
 if (defined $print_cor){
@@ -968,7 +1001,9 @@ sub sample_score {
 	
     # add values to output line
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
-    print $out_fh_sample_score_mat "$out_line\n";
+	$out_line .="\n";
+	return($out_line);
+	#    print $out_fh_sample_score_mat "$out_line\n";
 }
 
 sub covariance {

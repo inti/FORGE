@@ -759,6 +759,11 @@ sub get_snp_list_from_bgl_format {
 		my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
 		last if ($line eq '1');
 		my ($snp,$a1,$a2) = split(/\s+/,$line);
+		if ( defined $affy_to_rsid ) {
+			if ($snp !~ m/^rs/){
+				if (exists $affy_id{$snp}){ $snp = $affy_id{$snp};}
+			}
+		}		
 		push @back,{
 			'snp_id' => $snp,
 			'chr'    => 0,
@@ -784,6 +789,11 @@ sub get_snp_list_from_ox_format {
 		my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
 		last if ($line eq '1');
 		my ($chr,$snp,$pos,$a1,$a2) = split(/\s+/,$line);
+		if ( defined $affy_to_rsid ) {
+			if ($snp !~ m/^rs/){
+				if (exists $affy_id{$snp}){ $snp = $affy_id{$snp};}
+			}
+		}
 		push @back,{
 			'snp_id' => $snp,
 			'chr'    => $chr,

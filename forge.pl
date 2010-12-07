@@ -107,7 +107,7 @@ if (defined $geno_probs){
     $gprobs_index->open("+>$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n");
     build_index(*$gprobs, *$gprobs_index);
         
-=head    } else {
+=h    } else {
         print_OUT("   '-> Found [ $geno_probs.idx ] file, will use it to read the genotype probabilities. Please delete if you do not want to use this file.");
         $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
         $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n") and exit(1);
@@ -292,9 +292,9 @@ if (defined $bfile) {
   @fam = @$fam_ref;
   @bim = @$bim_ref;
 } elsif (defined $geno_probs){
-	print "Getting SNP list from gprobs file\n";
-	@bim = @{ get_genotypes_from_ox_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'OXFORD');
-	@bim = @{ get_genotypes_from_bgl_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'BEAGLE');
+	print_OUT("Getting list of genotypes SNPs from [ $gprobs ]\n");
+	@bim = @{ get_snp_list_from_ox_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'OXFORD');
+	@bim = @{ get_snp_list_from_bgl_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'BEAGLE');
 }
 
 my %bim_ids = ();
@@ -748,7 +748,7 @@ sub line_with_index {
 		return scalar(<$data_file>);
 	}
 }
-sub get_genotypes_from_bgl_format {
+sub get_snp_list_from_bgl_format {
 	my $geno_probs = shift;
 	my $geno_probs_index = shift;
 	my $index = 0;
@@ -773,7 +773,7 @@ sub get_genotypes_from_bgl_format {
 	return ( \@back );
 }
 
-sub get_genotypes_from_ox_format {
+sub get_snp_list_from_ox_format {
 	my $geno_probs = shift;
 	my $geno_probs_index = shift;
 	my $index = 0;
@@ -852,7 +852,7 @@ sub gene_pvalue {
         }
     #if the user defined a genotype file then we need to get the number of SNPs in the gene.
     # if the user did not defined neither a genotype nor a file with the SNP-SNP correlations exit the program
-    unless (defined $bfile or defined $spearman or defined $ped) {
+    unless (defined $bfile or defined $spearman or defined $ped or defined $geno_probs) {
         print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
         exit(1);
     }
@@ -875,14 +875,14 @@ sub gene_pvalue {
     # if desired weigth by the 1/MAF
     if (defined $w_maf){
 	my $MAF_w = [];
-	for my $i (0 .. $n_snps - 1) {
-	    my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->nelem;
-	    $tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
-	    push @{$MAF_w}, $tmp_maf;
-	}
-	$MAF_w = pdl $MAF_w;
-	$MAF_w = 1/$MAF_w;
-	$gene{$gn}->{weights} *= $MAF_w->transpose;
+		for my $i (0 .. $n_snps - 1) {
+			my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->nelem;
+			$tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
+			push @{$MAF_w}, $tmp_maf;
+		}
+		$MAF_w = pdl $MAF_w;
+		$MAF_w = 1/$MAF_w;
+		$gene{$gn}->{weights} *= $MAF_w->transpose;
     }
         
     # Correct the weights by the LD in the gene.

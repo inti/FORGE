@@ -1367,34 +1367,37 @@ __END__
 
 script [options]
 
- 	-h, --help		print help message
- 	-m, --man		print complete documentation
- 	-report			how often to report advance
- 	-verbose, -v		useful for debugging
- 	
-        Input Files:
- 	-ped			Genotype file in PLINK PED format
- 	-map			SNP info file in PLINK MAP format
- 	-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam. 
- 	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
-        -snpmap, -m		Snp-to-gene mapping file
- 	-affy_to_rsid		Affy id to rs id mapping file
- 	
-        Output Files:
- 	-out, -o		Name of the output file
- 	-print_cor		print out SNP-SNP correlations
- 	
-        Analsis modifiers:
-        -gene_list, -g		Only analyse genes on the file provided
- 	-genes			Provide some gene name in command line, only these genes will be analyzed
- 	-all_genes		Analyze all genes in the snp-to-gene mapping file
- 	-chr			Anlyze a specific chromosome  
- 	-distance, -d		Max SNP-to-gene distance allowed (in kb)
-	-correlation, -cor	SNP-SNP correlation file
- 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
-        -lambda			lambda value to correct SNP statistics, if genomic control is used
-	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
-        -no_forge               Do not do a forge analysis. e.g. if only performing sample-scoring
+		-h, --help		print help message
+		-m, --man		print complete documentation
+		-report			how often to report advance
+		-verbose, -v	useful for debugging
+		
+		Input Files:
+		-ped			Genotype file in PLINK PED format
+		-map			SNP info file in PLINK MAP format
+		-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam.
+		-ox_gprobs      Genotype probabilities in OXFORD format.
+		-bgl_gprobs		Genotype probabilities in BEAGLE format.
+		-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
+		-snpmap, -m		Snp-to-gene mapping file
+		-affy_to_rsid		Affy id to rs id mapping file
+		
+		Output Files:
+		-out, -o		Name of the output file
+		-print_cor		print out SNP-SNP correlations
+		
+		Analsis modifiers:
+		-gene_list, -g		Only analyse genes on the file provided
+		-genes				Provide some gene name in command line, only these genes will be analyzed
+		-all_genes			Analyze all genes in the snp-to-gene mapping file
+		-chr				Anlyze a specific chromosome  
+		-distance, -d		Max SNP-to-gene distance allowed (in kb)
+		-correlation, -cor	SNP-SNP correlation file
+		-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+		-lambda				lambda value to correct SNP statistics, if genomic control is used
+		-gc_correction		Determine the lamda for the genomic control correction from the input p-values
+		-no_forge           Do not do a forge analysis. e.g. if only performing sample-scoring
+		-g_prob_threshold	Floating number. Genotype probabilites below this threshold will be set to missing
         
         Weigthing
         -weights, -w            File with SNP weights
@@ -1403,9 +1406,8 @@ script [options]
  	
         Sample Score Analysis:
         -sample_score		Generate sample level score (it requieres sample level genotypes).
-        -ox_gprobs              Genotype probabilities in OXFORD format.
-	-ss_mean		Calculate the sample score as the mean of the sample's risk loading, Default is the sum.
-        
+		-ss_mean			Calculate the sample score as the mean of the sample's risk loading, Default is the sum.
+		-flush				Integer. The output lines will be printed in chunks of size -flush. default prints 1000 lines at time.
 	
         
 =head1 OPTIONS
@@ -1438,7 +1440,17 @@ SNP info file in PLINK MAP format
 
 =item B<-bfile>
 
-Files in PLINK binary format, with extension *.bed, *.bim and *.fam. 
+Files in PLINK binary format, with extension *.bed, *.bim and *.fam.
+ 
+=item B<-ox_gprobs>
+ 
+File with genotype probabilities in OXFORD format. See http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html for details in the file format. An example is
+1	rs10489629	67400370 2 4 1 0 0 0 1 0 1 0 0
+Columns are chromosome, SNP id, SNP position, minor alelle (A), major alelle (B), prob for AA at sample1,  prob for AB at sample1,  prob for BB at sample1, prob for AA at sample2, etc.
+
+=item B<-bgl_gprobs>
+
+Genotype probabilities in BEAGLE format. Please see http://faculty.washington.edu/browning/beagle/beagle.html for details on the format
 
 =item B<-out, -o>
 
@@ -1491,6 +1503,14 @@ lambda value to correct SNP statistics, if genomic control is used
 
 Correct the SNP pvalues by the genomic control method. It will calculate the lambda from the data itself. PLEASE MAKE SURE YOU DO NOT FILTER THE SNPS BEFORE RUNNING FORGE OR THE CORRECTION MAY BE ERRONEOUS.
 
+=item B<-no_forge>
+
+Do not do a forge analysis. e.g. if only performing sample-scoring
+
+=item B<-g_prob_threshold>
+
+Floating number. Genotype probabilites below this threshold will be set to missing
+
 =item B<-print_cor>
 
 print out SNP-SNP correlations
@@ -1529,13 +1549,10 @@ Indicate if the SNP weight file has a header.
 
 Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
 
-=item B<-ox_gprobs>
-
-File with genotype probabilities in OXFORD format. See http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html for details in the file format. An example is
-1	rs10489629	67400370 2 4 1 0 0 0 1 0 1 0 0
-Columns are chromosome, SNP id, SNP position, minor alelle (A), major alelle (B), prob for AA at sample1,  prob for AB at sample1,  prob for BB at sample1, prob for AA at sample2, etc.
-
-
+=item B<-flush>
+ 
+The output lines will be printed in chunks of size -flush. default prints 1000 lines at time.
+ 
 =back
 
 =head1 DESCRIPTION

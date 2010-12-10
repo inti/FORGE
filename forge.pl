@@ -493,12 +493,33 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn"); }
 			push @{$snp_list}, $mapped_snp;
 			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
+			push @{$gene{$gn}->{pvalues}}, $assoc_data{ $mapped_snp }->{pvalue};
 			push @{$lines}, $bim_ids{$mapped_snp} + 1;
 		}
 		my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold,$geno_probs_format);
 		$gene{$gn}->{genotypes} = $d_mat;
+		# check the range of the values. if the range is 0 then the SNP is monomorphic and shoudl be dropped
+		my ($min,$max,$min_d,$max_d)= $gene{$gn}->{genotypes}->minmaximum;
+		my $non_zero_variance_index = which(($max - $min) != 0);
+		# check if any SNPs needs to be dropped
+		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
+		my $new_size = scalar list $non_zero_variance_index;
+		if ($new_size == 0){
+			print_OUT("All SNPs are monomorphic, going to next gene. Total SNPs [ $old_size ] and [ $new_size] are mono");
+			next;
+		}
+		if ( $old_size != $new_size){
+			$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->(,$non_zero_variance_index);
+			$gene{$gn}->{geno_mat_rows} = [@{$gene{$gn}->{geno_mat_rows}}[$non_zero_variance_index->flat->list] ];
+			$gene{$gn}->{pvalues} = [@{$gene{$gn}->{pvalues}}[$non_zero_variance_index->flat->list] ];
+			if (defined $v){
+				my $diff = $old_size - $new_size;
+				print_OUT("Dropping [ $diff ] monomorphic SNPs");
+			}
+		}
+		#calculate the SNP-SNP correlation
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
-		# Calculate the weights for the gene
+		#### Calculate the weights for the gene
 		if (defined @weights_file){
 			$gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
 		} else {
@@ -507,6 +528,9 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			$gene{$gn}->{weights} *= 1/$n_snps;
 			$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
 		}
+		# Calculate average max genotype prob and use it as weitghs
+		$gene{$gn}->{weights} *= daverage $gene{$gn}->{genotypes};
+		$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
 		
 		# calculate gene p-values
 		&gene_pvalue($gn) if (not defined $no_forge);
@@ -669,6 +693,17 @@ if (defined $print_cor){
 }
 print_OUT("Well Done!!");
 exit(0);
+
+sub get_maf_weights {
+	my $genotypes = shift;
+	my $MAF_w = $genotypes->sumover/(2*$genotypes->getdim(0));
+	my $maf_to_flip = which($MAF_w >0.5);
+	$MAF_w->index($maf_to_flip) .= 1 - $MAF_w->index($maf_to_flip);
+	$MAF_w /= $MAF_w->sum;
+	$MAF_w = $MAF_w->flat; 
+	return($MAF_w);
+}
+
 sub extract_genotypes_for_snp_list{
 	my $snp_list = shift;
 	my $line_index = shift;
@@ -917,15 +952,8 @@ sub gene_pvalue {
 
     # if desired weigth by the 1/MAF
     if (defined $w_maf){
-	my $MAF_w = [];
-		for my $i (0 .. $n_snps - 1) {
-			my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->(,$i)->flat->nelem;
-			$tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
-			push @{$MAF_w}, $tmp_maf;
-		}
-		$MAF_w = pdl $MAF_w;
-		$MAF_w = 1/$MAF_w;
-		$gene{$gn}->{weights} *= $MAF_w->transpose;
+	my $MAF_w = get_maf_weights($gene{$gn}->{genotypes});
+	$gene{$gn}->{weights} *= $MAF_w->transpose;
     }
         
     # Correct the weights by the LD in the gene.
@@ -934,15 +962,15 @@ sub gene_pvalue {
     # the weights for the mean are the correlation between the SNP, In that way the
     # weights reflect the correlation pattern of the SNPs 
     # weights reflect the correlation pattern of the SNPs
-
     my $w_matrix = $gene{$gn}->{weights}*abs($gene{$gn}->{cor}); # multiply the weights by the correaltions
     my @dims = $w_matrix->dims();
     $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
     if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
     $w_matrix /= $w_matrix->sum; # make sure weights sum 1
+    
     $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
-   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
+   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
    my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
    # print out the results
@@ -1003,7 +1031,7 @@ sub sample_score {
     my $out_line = "$gene->{ensembl} $gene->{hugo} " . join " " , $sample_z->list;
 	$out_line .="\n";
 	return($out_line);
-	#    print $out_fh_sample_score_mat "$out_line\n";
+
 }
 
 sub covariance {
@@ -1033,10 +1061,13 @@ sub get_makambi_chi_square_and_df {
   ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
   my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics
   my $df = 8/$varMf_m; # the degrees of freedom of the test statistic
-#  if (defined $sample_score_self){ $df *= 2;}
-   
-  my $chi_stat = sumover(-2 * $pvalues->log * $w); # and the chi-square for the combine probability
+  my $chi_stat = dsum(-2 * $pvalues->log * $w); # and the chi-square for the combine probability
   $chi_stat = ( $chi_stat/2 ) * $df;
+  my $sum = dsum(-2 * $pvalues->log * $w);
+  if (defined $v){
+  	print_OUT("df: $df; var: $varMf_m; w: $w; chi-stat:$chi_stat; SUM: $sum");
+ 	print_OUT("P-values: " . $pvalues . "");
+  }   
   return ($chi_stat,$df);
 }
 

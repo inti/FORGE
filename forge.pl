@@ -296,7 +296,7 @@ if (defined $bfile) {
   @fam = @$fam_ref;
   @bim = @$bim_ref;
 } elsif (defined $geno_probs){
-	print_OUT("Getting list of genotypes SNPs from [ $gprobs ]\n");
+	print_OUT("Getting list of genotypes SNPs from [ $geno_probs ]");
 	@bim = @{ get_snp_list_from_ox_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'OXFORD');
 	@bim = @{ get_snp_list_from_bgl_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'BEAGLE');
 }

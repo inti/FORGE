@@ -2,8 +2,9 @@
 use strict;
 use Data::Dumper;
 use Getopt::Long;
+use Pod::Usage;
 
-our ( $list, $dist, $assoc,$keep, $affy_to_rsid, $out);
+our ( $help,$man,$list, $dist, $assoc,$keep, $affy_to_rsid, $out);
 
 GetOptions(
    'gene_list=s'    => \$list, 
@@ -12,7 +13,12 @@ GetOptions(
    'affy_to_rsid=s' => \$affy_to_rsid,
    'keep_annot' => \$keep,
    'out|o=s' => \$out,
-);
+)or pod2usage(0);
+
+pod2usage(0) if (defined $help);
+pod2usage(-exitstatus => 2, -verbose => 1) if (defined $man);
+pod2usage(0) if (not defined $assoc);
+pod2usage(0) if (scalar @ARGV == 0);
 
 defined $dist or $dist = 20;
 print scalar localtime(), "\t", "SNP to gene mapping set to [ $dist ]\n";
@@ -154,3 +160,70 @@ sub get_header {
    }
    return(\%back);
 }
+
+
+
+__END__
+
+=head1 NAME
+
+ Running network analysis by greedy search
+
+=head1 SYNOPSIS
+
+script [options] -- snp-2-gene-mapping-files
+
+	-h, --help		print help message
+	-m, --man		print complete documentation
+	-gene_list		gene of list to analyze 
+   	-distance		max distance between SNPs and genes
+   	-assoc			file with SNP p-values. It need a header with at least SNP and P columns
+				Multiple file can be provided by giving the option more than once \$assoc,
+   	-affy_to_rsid		mapping between affy and rsids file
+   	-keep_annot		print in the output file all other columns from the input files
+	-out, -o		output file name
+        
+=head1 OPTIONS
+
+=over 8
+
+=item B<-help>
+
+Print help message
+  
+=item B<-man>
+
+print complete documentation
+
+=item B<-gene_list>
+
+gene of list to analyze 
+
+=item B<-distance>
+
+max distance between SNPs and genes
+
+=item B<-assoc>
+
+file with SNP p-values. It need a header with at least SNP and P columns. Multiple file can be provided by giving the option more than once.
+
+=item B<-affy_to_rsid>
+
+mapping between affy and rsids file
+
+=item B<-keep_annot>
+
+print in the output file all other columns from the input files
+
+=item B<-out, -o>
+
+output file name
+
+=back
+
+=head1 DESCRIPTION
+
+TODO
+
+
+=cut

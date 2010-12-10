@@ -504,7 +504,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		# check if any SNPs needs to be dropped
 		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
 		my $new_size = scalar list $non_zero_variance_index;
-		if ($new_size == 0){
+		if ($non_zero_variance_index->isempty()){
 			print_OUT("All SNPs are monomorphic, going to next gene. Total SNPs [ $old_size ] and [ $new_size] are mono");
 			next;
 		}

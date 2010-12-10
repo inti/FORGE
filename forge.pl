@@ -919,7 +919,7 @@ sub gene_pvalue {
     if (defined $w_maf){
 	my $MAF_w = [];
 		for my $i (0 .. $n_snps - 1) {
-			my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->nelem;
+			my $tmp_maf = $gene{$gn}->{genotypes}->(,$i)->flat->sum/$gene{$gn}->{genotypes}->(,$i)->flat->nelem;
 			$tmp_maf = 1 - $tmp_maf if ($tmp_maf > 0.5);
 			push @{$MAF_w}, $tmp_maf;
 		}

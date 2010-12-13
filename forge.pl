@@ -502,12 +502,12 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		my ($min,$max,$min_d,$max_d)= $gene{$gn}->{genotypes}->minmaximum;
 		my $non_zero_variance_index = which(($max - $min) != 0);
 		# check if any SNPs needs to be dropped
-		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
-		my $new_size = scalar list $non_zero_variance_index;
 		if ($non_zero_variance_index->isempty()){
-			print_OUT("All SNPs are monomorphic, going to next gene. Total SNPs [ $old_size ] and [ $new_size] are mono");
+			print_OUT(" [ $gn ] All SNPs are monomorphic, going to next gene") if (defined $v);
 			next;
 		}
+		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
+		my $new_size = scalar list $non_zero_variance_index;
 		if ( $old_size != $new_size){
 			$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->(,$non_zero_variance_index);
 			$gene{$gn}->{geno_mat_rows} = [@{$gene{$gn}->{geno_mat_rows}}[$non_zero_variance_index->flat->list] ];

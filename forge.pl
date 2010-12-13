@@ -106,9 +106,10 @@ if (defined $geno_probs){
     $gprobs_index = IO::File->new();
     
 #    if (not -e "$geno_probs.idx") {
-    print_OUT("   '-> Making index for genotype probabilities in [ $geno_probs.idx ] file");
+    my $index_name = "$geno_probs.$$.idx";
+    print_OUT("   '-> Making index for genotype probabilities in [ $index_name ] file");
     $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
-    $gprobs_index->open("+>$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n");
+    $gprobs_index->open("+>$index_name") or print_OUT("Can't open $index_name for read/write: $!\n");
     build_index(*$gprobs, *$gprobs_index);
         
 =h    } else {
@@ -517,6 +518,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 				print_OUT("Dropping [ $diff ] monomorphic SNPs");
 			}
 		}
+		
 		#calculate the SNP-SNP correlation
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
 		#### Calculate the weights for the gene
@@ -691,6 +693,10 @@ if (defined $print_cor){
   }
   close(COR);
 }
+
+# delete index file if one was created to read genotype prob files
+if (defined $geno_probs) { unlink("$geno_probs.$$.idx");} 
+
 print_OUT("Well Done!!");
 exit(0);
 

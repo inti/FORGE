@@ -1017,20 +1017,20 @@ sub sample_score {
     my $score_means = dsumover $geno_mat/$geno_mat->getdim(0);
     my $sample_z = null;
     if (defined $ss_mean){
-	my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
-	my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-	my $var_covMat = $cov->flat->dsum; # this is the variance of the test
-	# standarize each sample score by the mean and variance of the distribution
-	$sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
-	$sample_z -= $mean_over_all_scores;
-	$sample_z /= $var_covMat;
+		my $mean_over_all_scores = $score_means->davg; # the expected value is the mean of the means
+		my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
+		my $var_covMat = $cov->flat->dsum; # this is the variance of the test
+		# standarize each sample score by the mean and variance of the distribution
+		$sample_z = dsumover $geno_mat->xchg(0,1)/$geno_mat->getdim(1);
+		$sample_z -= $mean_over_all_scores;
+		$sample_z /= $var_covMat;
     } else {
-	my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
-	my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
-	my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
-	$sample_z = dsumover $geno_mat->xchg(0,1);
-	$sample_z -= $sum_over_all_scores;
-	$sample_z /= $var_covMat;
+		my $sum_over_all_scores = $score_means->dsum; # the expected value is the sum of the means
+		my $cov = covariance($geno_mat->transpose); # calculate the covariance matrix
+		my $var_covMat = sqrt( $cov->flat->dsum ) ; # this is the variance of the test
+		$sample_z = dsumover $geno_mat->xchg(0,1);
+		$sample_z -= $sum_over_all_scores;
+		$sample_z /= $var_covMat;
     }
 	
     # add values to output line

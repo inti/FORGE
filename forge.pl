@@ -105,19 +105,19 @@ if (defined $geno_probs){
     $gprobs = IO::File->new();
     $gprobs_index = IO::File->new();
     
-#    if (not -e "$geno_probs.idx") {
-    my $index_name = "$geno_probs.$$.idx";
+    if (not -e "$geno_probs.idx") {
+    my $index_name = "$geno_probs.idx";
     print_OUT("   '-> Making index for genotype probabilities in [ $index_name ] file");
     $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
     $gprobs_index->open("+>$index_name") or print_OUT("Can't open $index_name for read/write: $!\n");
     build_index(*$gprobs, *$gprobs_index);
         
-=h    } else {
+    } else {
         print_OUT("   '-> Found [ $geno_probs.idx ] file, will use it to read the genotype probabilities. Please delete if you do not want to use this file.");
         $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
         $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n") and exit(1);
+		$gprobs_index->binmode();
     }
-=cut
 } 
 
 unless (defined $no_forge){

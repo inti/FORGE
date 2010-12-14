@@ -1011,7 +1011,7 @@ sub sample_score {
     }
     $snps_effect_size= pdl @{$snps_effect_size}; # make it a piddle
     # multiply the genotypes by the effect size and the weights
-    #$geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
+    $geno_mat *= $snps_effect_size->transpose*$gene->{weights}->transpose; 
     
     # calculate the mean of the scores for each SNP
     my $score_means = dsumover $geno_mat/$geno_mat->getdim(0);

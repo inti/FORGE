@@ -104,19 +104,16 @@ my ($gprobs, $gprobs_index);
 if (defined $geno_probs){
     $gprobs = IO::File->new();
     $gprobs_index = IO::File->new();
-    
-    if (not -e "$geno_probs.idx") {
     my $index_name = "$geno_probs.idx";
-    print_OUT("   '-> Making index for genotype probabilities in [ $index_name ] file");
-    $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
-    $gprobs_index->open("+>$index_name") or print_OUT("Can't open $index_name for read/write: $!\n");
-    build_index(*$gprobs, *$gprobs_index);
-        
+     $gprobs->open("<$geno_probs") or print_OUT("I can not open genotype probability file [ $geno_probs ]") and exit(1);
+    if (not -e "$geno_probs.idx") {
+    	print_OUT("   '-> Making index for genotype probabilities in [ $index_name ] file");
+    	$gprobs_index->open("+>$index_name") or print_OUT("Can't open $index_name for read/write: $!\n");
+    	build_index(*$gprobs, *$gprobs_index);
     } else {
-        print_OUT("   '-> Found [ $geno_probs.idx ] file, will use it to read the genotype probabilities. Please delete if you do not want to use this file.");
-        $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
-        $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n") and exit(1);
-		$gprobs_index->binmode();
+        print_OUT("   '-> Found [ $geno_probs.idx ] file for genotype probabilities");
+        $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $index_name for read/write: $!\n") and exit(1);
+	binmode($gprobs_index);
     }
 } 
 

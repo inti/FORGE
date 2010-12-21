@@ -7,6 +7,7 @@ use PDL::GSL::CDF;
 use PDL::Primitive;
 use PDL::NiceSlice;
 use PDL::Stats::Basic;
+use PDL::LinearAlgebra;
 use PDL::Bad;
 use IO::File;
 use IO::Seekable;
@@ -117,10 +118,10 @@ if (defined $geno_probs){
     }
 } 
 
-unless (defined $no_forge){
+#unless (defined $no_forge){
 	open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
 	print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
-}
+#}
 
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){
@@ -605,6 +606,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
         $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
     }
     # calculate gene p-values
+	  &calculate_empirical_p($gene{$gn});
     &gene_pvalue($gn) if (not defined $no_forge);
     push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 
@@ -697,6 +699,119 @@ if (defined $geno_probs) { unlink("$geno_probs.$$.idx");}
 print_OUT("Well Done!!");
 exit(0);
 
+sub calculate_empirical_p {
+	use CovMatrix;
+	my $gene = shift;
+	my $z = pdl map { 
+		if ($_ == 0){
+			ltqnorm(0.5);
+		} elsif ($_ == 1) {
+			ltqnorm(0.5);
+		} else { 
+			-1*ltqnorm($_); 
+		} 
+	} @{ $gene->{'pvalues'} };
+	$gene->{'pvalues'} = pdl @{ $gene->{'pvalues'} };
+
+	return(-9) if (scalar @{$gene->{'geno_mat_rows'}} < 2);
+	my $cov_mat_shrink = cov_shrink($gene->{genotypes}->transpose) ;
+	#print "\tlambda cor: $cov_mat_shrink->{lambda_cor}; lambda var: $cov_mat_shrink->{lambda_var}\n";
+	
+	my $cor = $gene->{'cor'}->copy();
+	$cor->diagonal(0,1) .=0;
+	$cor = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3));
+	
+	my $w = ones $cor->getdim(0);
+	$w /= $w->dsum;
+
+	my $df = 8/(dsum($cor*$w*$w->transpose) + 4*dsum($w**2));
+	my $chi = $df*0.5*dsum(-2*$gene->{'pvalues'}->log*$w);
+	my ($k,$meff) = number_effective_tests(\$cov_mat_shrink->{'cor'});
+
+	my $cov = $w*$w->transpose*$cov_mat_shrink->{'cor'};
+	$cov = make_positive_definite($cov);
+	my $SUM = dsum($cov);
+	
+	my $observed_stat = ((dsum($z*$w)/dsum($w))**2)/$SUM;
+	print OUT "$gene->{ensembl}\t$gene->{hugo}\t$observed_stat";
+	
+	my $mu = zeroes $cov_mat_shrink->{cov}->getdim(0);
+	my $seen = 0;
+	my $done = 0;
+	my $MAX = 1_000_000;
+	my $N = 100;
+	my $iter = 1;
+	my $chol = undef;
+	do {
+		my ($random_mult,$chol) = rmnorm($N,$mu,$cov);
+		$random_mult *= transpose($w);
+		my $r_sum = ($random_mult->xchg(0,1)->dsumover)/dsum($w);
+		$r_sum = ($r_sum**2)/$SUM;
+		$seen += dsum($r_sum >= $observed_stat);
+		$done += $N;
+	} until ($seen >= 10 or $done >= $MAX);
+	my $empi_p = ($seen + 1)/($done + 1);
+	print OUT "\t$empi_p\t$chi\t$df\t$k\t$meff\n";	
+}
+
+sub ltqnorm ($) {
+    #
+    # Lower tail quantile for standard normal distribution function.
+    #
+    # This function returns an approximation of the inverse cumulative
+    # standard normal distribution function.  I.e., given P, it returns
+    # an approximation to the X satisfying P = Pr{Z <= X} where Z is a
+    # random variable from the standard normal distribution.
+    #
+    # The algorithm uses a minimax approximation by rational functions
+    # and the result has a relative error whose absolute value is less
+    # than 1.15e-9.
+    #
+    # Author:      Peter John Acklam
+    # Time-stamp:  2000-07-19 18:26:14
+    # E-mail:      pjacklam@online.no
+    # WWW URL:     http://home.online.no/~pjacklam
+	
+    my $p = shift;
+    die "input argument must be in (0,1)\n" unless 0 < $p && $p < 1;
+	
+    # Coefficients in rational approximations.
+    my @a = (-3.969683028665376e+01,  2.209460984245205e+02,
+	-2.759285104469687e+02,  1.383577518672690e+02,
+	-3.066479806614716e+01,  2.506628277459239e+00);
+    my @b = (-5.447609879822406e+01,  1.615858368580409e+02,
+	-1.556989798598866e+02,  6.680131188771972e+01,
+	-1.328068155288572e+01 );
+    my @c = (-7.784894002430293e-03, -3.223964580411365e-01,
+	-2.400758277161838e+00, -2.549732539343734e+00,
+	4.374664141464968e+00,  2.938163982698783e+00);
+    my @d = ( 7.784695709041462e-03,  3.224671290700398e-01,
+	2.445134137142996e+00,  3.754408661907416e+00);
+	
+    # Define break-points.
+    my $plow  = 0.02425;
+    my $phigh = 1 - $plow;
+	
+    # Rational approximation for lower region:
+    if ( $p < $plow ) {
+		my $q  = sqrt(-2*log($p));
+		return ((((($c[0]*$q+$c[1])*$q+$c[2])*$q+$c[3])*$q+$c[4])*$q+$c[5]) /
+		(((($d[0]*$q+$d[1])*$q+$d[2])*$q+$d[3])*$q+1);
+    }
+	
+    # Rational approximation for upper region:
+    if ( $phigh < $p ) {
+		my $q  = sqrt(-2*log(1-$p));
+		return -((((($c[0]*$q+$c[1])*$q+$c[2])*$q+$c[3])*$q+$c[4])*$q+$c[5]) /
+		(((($d[0]*$q+$d[1])*$q+$d[2])*$q+$d[3])*$q+1);
+    }
+	
+    # Rational approximation for central region:
+    my $q = $p - 0.5;
+    my $r = $q*$q;
+    return ((((($a[0]*$r+$a[1])*$r+$a[2])*$r+$a[3])*$r+$a[4])*$r+$a[5])*$q /
+	((((($b[0]*$r+$b[1])*$r+$b[2])*$r+$b[3])*$r+$b[4])*$r+1);
+}
 sub get_maf_weights {
 	my $genotypes = shift;
 	my $MAF_w = $genotypes->sumover/(2*$genotypes->getdim(0));
@@ -981,6 +1096,21 @@ sub gene_pvalue {
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
    printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
 
+}
+
+
+sub rmnorm {
+	my $n = shift;
+	my $mean = shift;
+	my $c = shift;
+	my $chol = shift;
+	my @back = ();
+	my $d = $c->getdim(0);
+	my $vector = mpdl grandom $d,$n;
+	if (not defined $chol) { $chol = mchol($c); }
+	my $z = $vector x $chol->transpose;
+	my $y = transpose( $mean + transpose($z));
+	return($y,$chol);
 }
 
 # this subroutine calcultes a gene-score for each sample

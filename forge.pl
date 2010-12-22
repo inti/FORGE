@@ -1435,6 +1435,187 @@ sub get_lambda_genomic_control {
 	return $chi->median/0.456;
 }
 
+sub calculate_LD_stats {
+=head1 Docs
+
+	From Lon Cardon
+
+	The EM algorithm is used to estimate the recombination fraction (parameter theta)
+	between two genetic markers under the assumption of Hardy-Weinberg equilibrium.
+
+	For SNPs, consider the 3 x 3 table of marker 1 with alleles 'A' and 'a' 
+	and marker 2 with alleles 'B' and 'b'.  Number the cells as follows:
+
+	AA  |  Aa  |  aa
+	-------------------
+	BB |  0  |   1  |  2
+	Bb |  3  |   4  |  5
+	bb |  6  |   7  |  8
+
+	Note that all cells arise from unique haplotypes (e.g., cell 0 can only comprise
+	two 'AB' haplotypes; cell 1 has one 'AB' and one 'aB', etc), _except_ the double
+	heterozygote cell 4, which can have either AB/ab or Ab/aB.  We need to estimate the
+	probability of these two events.  We assume that pair AB/ab arises when no
+	recombination occurs (1 - theta) whereas pair Ab/aB arises in the presence of recombination
+	(probability theta).  Thus, for the four haplotype possibilities at two markers 
+	(AB,ab,Ab,aB), we have:
+
+	prAB=prAb=praB=prab=.25;  
+
+	nAB=(float)(2*cells[0]+cells[1]+cells[3]); 
+	nab=(float)(2*cells[8]+cells[7]+cells[5]);
+	nAb=(float)(2*cells[6]+cells[7]+cells[3]);
+	naB=(float)(2*cells[2]+cells[1]+cells[5]);
+
+	N = nAB + nab + nAb + naB + 2*cell4;
+
+	while(theta-thetaprev > CONVERGENCE_CRITERIA) 
+	{
+	thetaprev=theta;
+	prAB=(nAB + (1-theta)*cells[4])/N;
+	prab=(nab + (1-theta)*cells[4])/N;
+	prAb=(nAb + theta*cells[4])/N;
+	praB=(naB + theta*cells[4])/N;
+	theta=(prAb*praB)/(prAB*prab + prAb*praB); 
+	}
+
+
+	i.e., D = prAB - frq(A)*frq(B), r^2 = D^2/(frq(A)*frq(B)*frq(a)*frq(b)),
+	Dprime = D/Dmax, etc.
+	 
+=cut
+    my $first  = shift;
+    my $second = shift;
+	
+    my %genotypes = (	'AABB' => 0, # cell 0
+	'AaBB' => 0, # cell 1
+	'aaBB' => 0, # cell 2
+	
+	'AABb' => 0, # cell 3
+	'AaBb' => 0, # cell 4
+	'aaBb' => 0, # cell 5
+	
+	'AAbb' => 0, # cell 6
+	'Aabb' => 0, # cell 7
+	'aabb' => 0  # cell 8
+	);
+	
+	for (my $i = 0; $i < scalar @$first; $i++){
+		$genotypes{'AABB'}++ if (( $first->[$i] == 1) and ($second->[$i] == 1));	
+		$genotypes{'AaBB'}++ if (( $first->[$i] == 2) and ($second->[$i] == 1));	
+		$genotypes{'aaBB'}++ if (( $first->[$i] == 3) and ($second->[$i] == 1));	
+		
+		$genotypes{'AABb'}++ if (( $first->[$i] == 1) and ($second->[$i] == 2));	
+		$genotypes{'AaBb'}++ if (( $first->[$i] == 2) and ($second->[$i] == 2));	
+		$genotypes{'aaBb'}++ if (( $first->[$i] == 3) and ($second->[$i] == 2));	
+		
+		$genotypes{'AAbb'}++ if (( $first->[$i] == 1) and ($second->[$i] == 3));	
+		$genotypes{'Aabb'}++ if (( $first->[$i] == 2) and ($second->[$i] == 3));	
+		$genotypes{'aabb'}++ if (( $first->[$i] == 3) and ($second->[$i] == 3));	
+	}
+	
+	my ($nAB,$nAb,$naB,$nab) = double 0.0;
+    $nAB = 2*$genotypes{'AABB'} + $genotypes{'AaBB'} + $genotypes{'AABb'};
+    $nab = 2*$genotypes{'aabb'} + $genotypes{'Aabb'} + $genotypes{'aaBb'};
+    $nAb = 2*$genotypes{'AAbb'} + $genotypes{'Aabb'} + $genotypes{'AABb'};
+    $naB = 2*$genotypes{'aaBB'} + $genotypes{'AaBB'} + $genotypes{'aaBb'};
+    my $AaBb = double $genotypes{'AaBb'};
+	
+ 	
+	if (defined $v){
+		print "Haplotype freqs\n";
+		print  "Table: $genotypes{'AABB'}  $genotypes{'AaBB'} $genotypes{'aaBB'}\n";
+	    print  "Table: $genotypes{'AABb'}  $genotypes{'AaBb'} $genotypes{'aaBb'}\n";
+	    print  "Table: $genotypes{'AAbb'}  $genotypes{'Aabb'} $genotypes{'aabb'}\n";
+	}
+	
+    my $N = double $nAB + $nab + $nAb + $naB + 2*$AaBb;
+    my $theta = 0.5;
+    my $thetaprev = 2;
+   	my $iterations = 0;
+    while( abs($theta-$thetaprev) > 0.0001 ) {	
+		$thetaprev = $theta;
+		eval{
+			$theta = (($nAb + $theta*$AaBb)*($naB + $theta*$AaBb))/
+		    (($nAB + (1-$theta)*$AaBb)*($nab + (1-$theta)*$AaBb) + 
+			($nAb + $theta*$AaBb)*($naB + $theta*$AaBb));
+		};
+		if ($@){ $theta = 0.5; } #included to avoid division by 0
+		$iterations++;
+    }
+	
+    # now calculate stats
+    #my ( $f_A, $f_B ) = major_freqs( \%people );
+	my ( $f_A, $f_B ) = 0;
+	my $n = 0;
+	map {  
+		if ($_ > 0){
+			$f_A += 2 if ($_ == 1);
+			$f_A += 1 if ($_ == 2);
+			$n++;
+		}
+	} @$first;
+    $f_A /= 2*$n;
+	$n = 0;
+	map {  
+		if ($_ > 0){
+			$f_B += 2 if ($_ == 1);
+			$f_B += 1 if ($_ == 2);
+			$n++;
+		}
+	} @$second;
+    $f_B /= 2*$n;
+	
+	#	print "$f_A $f_B\n";
+	#getc;
+    my $D;
+    my $r2;
+    eval{
+		$D  = ($nAB+(1-$theta)*$AaBb)/$N - ($f_A*$f_B);
+		$r2 = $D*$D/($f_A*$f_B*(1-$f_A)*(1-$f_B)); 
+    };
+	
+    if ($@){
+		$D = 0;
+		$r2 = 0; #for some cases is not possible to calculate the r2 due to a 0 in the divisor
+    }
+    
+    my $Dmax = 0;
+    my $d_prime;
+    
+    if ($D < 0){
+		$Dmax = $f_A*$f_B if ($f_A*$f_B < ((1-$f_A)*(1-$f_B)));
+		$Dmax = (1-$f_A)*(1-$f_B) if ($f_A*$f_B >= ((1-$f_A)*(1-$f_B)));	
+    }
+    if ($D > 0){
+		$Dmax = $f_A*(1-$f_B) if ($f_A*(1-$f_B) < (1-$f_A)*$f_B);
+		$Dmax = (1-$f_A)*$f_B if ($f_A*(1-$f_B) >= (1-$f_A)*$f_B);
+    }
+    eval{
+		$d_prime = $D/$Dmax;
+    };
+    if ($@){
+		$d_prime = 0;
+    }
+	
+	$D = sclr $D;
+	$r2 = sclr $r2;
+	$N = sclr $N;
+	$d_prime = sclr $d_prime;
+	$theta = sclr $theta;
+    my $o = { 'D'=> $D,
+		'r2' => $r2,
+		'theta' => $theta,
+		'N' =>  $N,
+		'd_prime' =>  $d_prime,
+		#'people' => scalar(keys %people)
+	};
+    return $o;
+	
+}
+
+
+
 sub pearson_corr_genotypes {
   # implemented as in S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
   # genotypes must be coded as 1,2 and 3,any other coding will be use. missing genotypes can be set to anything different of 1, 2 or 3.

@@ -601,6 +601,23 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
       push @{ $gene{$gn}->{geno_mat_rows} }, $bim[ $bim_ids{$mapped_snp} ]->{snp_id};
       # store the p-value of the snp
       push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{pvalue}; 
+		my $effect_measure = $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure};
+		if (defined $effect_measure){
+			if ($effect_measure eq 'or'){
+				push @{ $gene{$gn}->{effect_size} }, log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{$effect_measure};
+			} else {
+				push @{ $gene{$gn}->{effect_size} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{$effect_measure};
+			}
+			if (defined $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se}){
+				if ($effect_measure eq 'or'){
+					#push @{ $gene{$gn}->{effect_size_se} }, abs log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se};
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure_se};
+				} else {
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure_se};
+				}
+			}
+		}
+		
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;

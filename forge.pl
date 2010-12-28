@@ -744,42 +744,108 @@ exit(0);
 sub calculate_empirical_p {
 	use CovMatrix;
 	my $gene = shift;
+	if ( ref($gene->{'pvalues'}) eq 'ARRAY'){ $gene->{'pvalues'} = pdl @{ $gene->{'pvalues'} }; }
+	if ( ref($gene->{'effect_size'}) eq 'ARRAY'){ $gene->{'effect_size'} = pdl @{ $gene->{'effect_size'} }; }
+	if ( ref($gene->{'effect_size_se'}) eq 'ARRAY'){ $gene->{'effect_size_se'} = pdl @{ $gene->{'effect_size_se'} }; }
 	
-	my $cor = $gene->{'cor'}->copy();
-	$cor->diagonal(0,1) .=0;
-	$cor = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3));
+	if (scalar @{$gene->{'geno_mat_rows'}} < 2){
+		return(-9);
+	}
 	
-	my $w = ones $cor->getdim(0);
-	$w /= $w->dsum;
+	my $cov = $gene->{cor_ld_r}**2;
+	
+	my $pvals = $gene->{'pvalues'};
+	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;
+	$pvals->index( which($pvals == 0)) .= double 2.2e-16;
+	my $B = -1*gsl_cdf_ugaussian_Pinv($pvals);
+	my $observed_stat = undef;
+	if (not defined $gene->{'effect_size_se'}){
+		$observed_stat = get_fix_and_radom_meta_analysis($B,$gene->{'effect_size_se'},undef,$cov);
+	} else {
+		my $se = 1/$gene->{'weights'};
+		$observed_stat = get_fix_and_radom_meta_analysis($B,$se,undef,$cov);
+	}
+	
+	
+=h
+	my $i = 0;
+	eval { mchol ($cov) };
+	while($@ ne ""){
+		$@ = "";
+		$i++;
+		if ($i > 25){
+			last;
+		}
+		my ($es,$esv) = eigens $cov;
+		$cov = make_positive_definite($cov,1e-8);
+		($es,$esv) = eigens $cov;
+		eval { mchol ($cov) };
+	}
 
-	my $df = 8/(dsum($cor*$w*$w->transpose) + 4*dsum($w**2));
-	my $chi = $df*0.5*dsum(-2*$gene->{'pvalues'}->log*$w);
-	my ($k,$meff) = number_effective_tests(\$cov_mat_shrink->{'cor'});
+	if (is_positive_definite($cov,1e-8) == 1){
+		$cov = make_positive_definite($cov,1e-8);
+	}
 
-	my $cov = $w*$w->transpose*$cov_mat_shrink->{'cor'};
-	$cov = make_positive_definite($cov);
-	my $SUM = dsum($cov);
-	
-	my $observed_stat = ((dsum($z*$w)/dsum($w))**2)/$SUM;
-	print OUT "$gene->{ensembl}\t$gene->{hugo}\t$observed_stat";
-	
-	my $mu = zeroes $cov_mat_shrink->{cov}->getdim(0);
-	my $seen = 0;
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov = $gene->{cor};
+		$cov->diagonal(0,1) .= 1.0001; 
+	}
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov->diagonal(0,1) .= 1.001; 
+	}
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov->diagonal(0,1) .= 1.01; 		
+	}
+
+
+	if (is_positive_definite($cov,1e-8) == 1){
+		print "Matrix never positive definite $gene->{ensembl}\t$gene->{hugo}\t",scalar @{$gene->{'geno_mat_rows'}},"\n";
+		return({ 'observed' => $observed_stat, 'empi_fix' => -1, 'empi_random' => -1} );
+	}
+=cut	
+	my $mu = zeroes $gene->{'pvalues'}->getdim(0);
+	my $seen_fix = 0;
+	my $seen_random = 0;
 	my $done = 0;
-	my $MAX = 1_000_000;
-	my $N = 100;
+	my $MAX = 10_000_000;
+	my $N = 20;
 	my $iter = 1;
-	my $chol = undef;
+	my ($random_mult,$chol) = "";
+	my $old = 0;
+=head
 	do {
-		my ($random_mult,$chol) = rmnorm($N,$mu,$cov);
-		$random_mult *= transpose($w);
-		my $r_sum = ($random_mult->xchg(0,1)->dsumover)/dsum($w);
-		$r_sum = ($r_sum**2)/$SUM;
-		$seen += dsum($r_sum >= $observed_stat);
+		($random_mult,$chol) = rmnorm($N,$mu,$cov,$chol);
+		for my $random (0 .. $N-1){
+			my $r_stats = get_fix_and_radom_meta_analysis($random_mult->($random,),$w,$cov);
+			if ($r_stats->{'Chi_fix'} >= $observed_stat->{'Chi_fix'}){$seen_fix++; print "$r_stats->{'Chi_fix'} >= $observed_stat->{'Chi_fix'}"; getc;}
+			if ($r_stats->{'Chi_random'} >= $observed_stat->{'Chi_random'}){$seen_random++ ;}
+			$old++ if ( (dsum($z*$w)**2)/dsum($w*$w->transpose*$cov) < (dsum($random_mult->($random,)*$w)**2)/dsum($w*$w->transpose*$cov));
+		}
+		my $tmp = $random_mult*$w->transpose;
+		$tmp = (($tmp->xchg(0,1)->dsumover/$w->dsum)**2)/dsum($w*$w->transpose*$cov);
+		print $tmp,"\n",($tmp >= $observed_stat->{'Chi_fix'}),"\n",dsum($tmp >= $observed_stat->{'Chi_fix'});
+		getc;
+		$random_mult = "";
 		$done += $N;
-	} until ($seen >= 10 or $done >= $MAX);
-	my $empi_p = ($seen + 1)/($done + 1);
-	print OUT "\t$empi_p\t$chi\t$df\t$k\t$meff\n";	
+		$N *=2;
+	} until ( (($seen_fix >= 10) and ($seen_random >= 10)) or $done >= $MAX);
+	print ">>",($old + 1)/($done + 1),"<<\n";
+=cut
+	my $empi_p_fix = ($seen_fix + 1)/($done + 1);
+	my $empi_p_random = ($seen_fix + 1)/($done + 1);
+	return({ 'observed' => $observed_stat ,'empi_fix' => $empi_p_fix, 'empi_random' => $empi_p_random});
+}
+
+sub is_positive_definite {
+	my $m = shift;
+	my $tol = shift;
+	my ($es,$esv) = eigens $m;
+	if (not defined $tol){ $tol = $m->getdim(0) * max(abs($esv)) * 2e-8; }
+	if ( sum($esv > $tol) == scalar( $esv->list) ) {
+		return(0);
+	} else {
+		return(1);
+	}
 }
 
 sub ltqnorm ($) {

@@ -652,9 +652,31 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
         $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
     }
     # calculate gene p-values
-	  &calculate_empirical_p($gene{$gn});
-    &gene_pvalue($gn) if (not defined $no_forge);
-    push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
+	my $z_based_p = z_based_gene_pvalues($gene{$gn});
+	  next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
+    my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
+
+	  print OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$pvalue_based_p->{sidak_min_p},
+			$pvalue_based_p->{fisher},
+			$pvalue_based_p->{fisher_chi},
+			$pvalue_based_p->{fisher_df},
+			$z_based_p->{'Chi_fix'},
+			1 - gsl_cdf_chisq_P($z_based_p->{'Chi_fix'},1),
+			$z_based_p->{'Chi_random'},
+			1 - gsl_cdf_chisq_P($z_based_p->{'Chi_random'},1),
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			1- gsl_cdf_chisq_P($z_based_p->{'Q'},$z_based_p->{'N'}-1),
+			$z_based_p->{'tau_squared'},
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			$z_based_p->{'N'});
+	  print OUT "\n";
+	  
+
+	push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
 
 	if (scalar @LINES_OUT_SS > $flush){
 		print $out_fh_sample_score_mat @LINES_OUT_SS;

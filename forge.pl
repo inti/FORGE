@@ -744,20 +744,6 @@ exit(0);
 sub calculate_empirical_p {
 	use CovMatrix;
 	my $gene = shift;
-	my $z = pdl map { 
-		if ($_ == 0){
-			ltqnorm(0.5);
-		} elsif ($_ == 1) {
-			ltqnorm(0.5);
-		} else { 
-			-1*ltqnorm($_); 
-		} 
-	} @{ $gene->{'pvalues'} };
-	$gene->{'pvalues'} = pdl @{ $gene->{'pvalues'} };
-
-	return(-9) if (scalar @{$gene->{'geno_mat_rows'}} < 2);
-	my $cov_mat_shrink = cov_shrink($gene->{genotypes}->transpose) ;
-	#print "\tlambda cor: $cov_mat_shrink->{lambda_cor}; lambda var: $cov_mat_shrink->{lambda_var}\n";
 	
 	my $cor = $gene->{'cor'}->copy();
 	$cor->diagonal(0,1) .=0;

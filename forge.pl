@@ -363,6 +363,8 @@ while ( my $read = <MAP> ) {
 		'cor' => null,
         'weights' => null,
 		'pvalues' => [],
+	    'effect_size' => [],
+	    'effect_size_se' => [],
 		'gene_status' => $gene_status,
 		'desc' => $description,
    };

@@ -201,15 +201,22 @@ while (  my $a = <ASSOC> ) {
   my $A2 = "NA";
   my $A1 = "NA";
   my $OR = 1;
+	my $SE = undef;
   my $BETA = undef;
   my $R2 = undef;
   my $STAT = undef;
   if (exists $header{"A2"}){ $A2 = $data[$header{"A2"}];}
   if (exists $header{"A1"}){ $A1 = $data[$header{"A1"}];}
-  if (exists $header{"OR"}){ $OR = $data[$header{"OR"}];}
+  if (exists $header{"OR"}){ 
+	  $OR = $data[$header{"OR"}];
+	  if ((exists $header{"L95"}) and (exists $header{"U95"})){ 
+		  $SE = $header{"U95"} - $header{"L95"};
+	  }
+  }
   if (exists $header{"BETA"}){ $BETA = $data[$header{"BETA"}];}
   if (exists $header{"R2"}){ $R2 = $data[$header{"R2"}];}
   if (exists $header{"STAT"}){ $STAT = $data[$header{"STAT"}];}
+  if (not defined $SE and exists $header{"SE"}){ $SE = $data[$header{"SE"}];}
   my $effect = undef;
   if (exists $header{"OR"}){
     $effect = "or";
@@ -233,6 +240,7 @@ while (  my $a = <ASSOC> ) {
                                         'a1' => $A1,
                                         'a2' => $A2,
                                         'or' => $OR,
+										'se' => $SE,
                                         'beta' => $BETA,
                                         'stat' => $STAT,
                                         'r2' => $R2,

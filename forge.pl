@@ -767,8 +767,7 @@ if (defined $geno_probs) { unlink("$geno_probs.$$.idx");}
 print_OUT("Well Done!!");
 exit(0);
 
-sub calculate_empirical_p {
-	use CovMatrix;
+sub z_based_gene_pvalues {
 	my $gene = shift;
 	if ( ref($gene->{'pvalues'}) eq 'ARRAY'){ $gene->{'pvalues'} = pdl @{ $gene->{'pvalues'} }; }
 	if ( ref($gene->{'effect_size'}) eq 'ARRAY'){ $gene->{'effect_size'} = pdl @{ $gene->{'effect_size'} }; }
@@ -777,7 +776,6 @@ sub calculate_empirical_p {
 	if (scalar @{$gene->{'geno_mat_rows'}} < 2){
 		return(-9);
 	}
-	
 	my $cov = $gene->{cor_ld_r}**2;
 	
 	my $pvals = $gene->{'pvalues'};
@@ -791,7 +789,11 @@ sub calculate_empirical_p {
 		my $se = 1/$gene->{'weights'};
 		$observed_stat = get_fix_and_radom_meta_analysis($B,$se,undef,$cov);
 	}
-	
+	return($observed_stat);	
+}
+
+sub calculate_empirical_p {
+	my $gene = shift;
 	
 =h
 	my $i = 0;
@@ -828,7 +830,6 @@ sub calculate_empirical_p {
 		print "Matrix never positive definite $gene->{ensembl}\t$gene->{hugo}\t",scalar @{$gene->{'geno_mat_rows'}},"\n";
 		return({ 'observed' => $observed_stat, 'empi_fix' => -1, 'empi_random' => -1} );
 	}
-=cut	
 	my $mu = zeroes $gene->{'pvalues'}->getdim(0);
 	my $seen_fix = 0;
 	my $seen_random = 0;
@@ -838,7 +839,6 @@ sub calculate_empirical_p {
 	my $iter = 1;
 	my ($random_mult,$chol) = "";
 	my $old = 0;
-=head
 	do {
 		($random_mult,$chol) = rmnorm($N,$mu,$cov,$chol);
 		for my $random (0 .. $N-1){
@@ -856,10 +856,11 @@ sub calculate_empirical_p {
 		$N *=2;
 	} until ( (($seen_fix >= 10) and ($seen_random >= 10)) or $done >= $MAX);
 	print ">>",($old + 1)/($done + 1),"<<\n";
-=cut
+
 	my $empi_p_fix = ($seen_fix + 1)/($done + 1);
 	my $empi_p_random = ($seen_fix + 1)/($done + 1);
-	return({ 'observed' => $observed_stat ,'empi_fix' => $empi_p_fix, 'empi_random' => $empi_p_random});
+=cut
+	return(-9);
 }
 
 sub is_positive_definite {

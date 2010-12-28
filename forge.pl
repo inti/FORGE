@@ -622,9 +622,21 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
 	
-	  # Calculate the genotypes correlation matrix
-	  $gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
-	  
+	# Calculate the genotypes correlation matrix
+	$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+	  #if (defined $corr_ld){
+		  my $n = scalar @{$gene{$gn}->{'geno_mat_rows'}};
+		  $gene{$gn}->{cor_ld_r} = zeroes $n,$n; 
+		  $gene{$gn}->{cor_ld_r}->diagonal(0,1) .= 1;
+		  for (my $i = 0; $i < $n; $i++){
+			  for (my $j = $i; $j < $n; $j++){
+				  next if ($j == $i);
+				  my $ld = calculate_LD_stats([ $gene{$gn}->{'genotypes'}->(,$i)->list ],[ $gene{$gn}->{'genotypes'}->(,$j)->list ]);	
+				  set $gene{$gn}->{cor_ld_r}, $i, $j, $ld->{r};
+				  set $gene{$gn}->{cor_ld_r}, $j, $i, $ld->{r};
+			  }
+		  }
+	  #}
 	  
 	  # Calculate the weights for the gene
     if (defined @weights_file){

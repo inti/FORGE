@@ -1153,7 +1153,9 @@ sub gene_pvalue {
    my ($k,$Meff_galwey) = number_effective_tests(\$gene{$gn}->{cor});
 
    # get the log of the SNP p-value
-   $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
+	if (ref($gene{$gn}->{pvalues}) eq "ARRAY"){
+		$gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
+	}
    # calculate the chi-square statistics for the Makambi method and its p-value
 
     #

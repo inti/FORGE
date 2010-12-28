@@ -1212,13 +1212,24 @@ sub gene_pvalue {
     $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
 
    my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
-   my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
+   my $fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
+	
+	my $sidak = sclr double 1-(1-$gene{$gn}->{minp})**$k;
+	$forge_df = sclr $forge_df;
+	$forge_chi_stat = sclr $forge_chi_stat;
+	my $back = {
+		'fisher' => $fisher_p_value,
+		'fisher_df' => $forge_df,
+		'fisher_chi' => $forge_chi_stat,
+		'sidak_min_p' => $sidak,
+		'Meff_gao' => $k,
+		'Meff_Galwey' => $Meff_galwey,
+	};
    # print out the results
-   my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
+  
    if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
-   printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
-
+	return($back);
 }
 
 

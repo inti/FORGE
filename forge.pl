@@ -1715,6 +1715,87 @@ sub calculate_LD_stats {
 	
 }
 
+sub get_fix_and_radom_meta_analysis {
+	my $B = shift;
+	my $SE = shift;
+	my $external_w = shift;
+	my $VarCov = shift;
+	if (ref($B) eq 'ARRAY') { $B = pdl $B; }
+	if (ref($SE) eq 'ARRAY') { $SE = pdl $SE; }
+	if (ref($external_w) eq 'ARRAY') { $external_w = pdl $external_w; }
+	my $N = $B->nelem;
+	if (not defined $VarCov) {
+		$VarCov = stretcher(ones $N);
+	}
+	my $W = null;
+	if ( (ref($external_w) eq 'PDL') and (nelem($external_w > 0) > 0) and (dsum( ($external_w - $external_w->davg)**2 ) > 0 )){
+		$W = 1/($SE + 1/$external_w); 
+	} else {
+		$W = 1/$SE; 
+	}
+	
+	my  $B_stouffer = dsum($B*$W)/sqrt(dsum($W**2));
+	# calculate fix effect estimate
+	my $B_fix = dsum($B*$W)/$W->dsum;
+	my $norm_w_fix = $W/$W->dsum;
+	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
+	#my $V_fix = dsum($W*$W->transpose*$VarCov);
+	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
+	
+	# calculate heteroogeneity parameter Q
+	my $Q = 0.0; 
+	{
+		my $cor = $VarCov->copy();
+		$cor->diagonal(0,1) .=0;
+		$cor = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3));
+		my $df = 8/(dsum($cor*$W*$W->transpose) + 4*dsum($W**2));
+		my $Q_naive = dsum ($W * (($B_fix - $B)**2));
+		$Q = sclr gsl_cdf_chisq_Pinv( gsl_cdf_chisq_P(  $df*0.5*$Q_naive, $df), $N - 1);
+	}	
+	# calculate heteroogeneity parameter I-squared
+	my $I_squared = 0.0;
+	if ($Q > ($N - 1)){
+		eval { $I_squared = 100*($Q - ($N - 1))/$Q; };
+		if ($@){
+			$I_squared = 0.0;
+		}
+	}
+	# calculate tau-squared
+	my $tau_squared = 0.0;
+	if ($Q > ($N - 1)){
+		eval { $tau_squared = ($Q - ($N - 1))/(dsum($W) - dsum($W**2)/$W->dsum); };
+		if ($@){
+			# tau-squared equal 0 if was < 0
+			$tau_squared = 0.0;
+		}
+	}
+	# calculate the random effect estimate
+	my $w_star = null;
+	if ( (ref($external_w) eq 'PDL') and (nelem($external_w > 0) > 0) and (dsum( ($external_w - $external_w->davg)**2 ) > 0 )){
+		$w_star = 1/( $tau_squared + $SE + 1/$external_w);
+	} else {
+		$w_star = 1/( $tau_squared + $SE);
+	}
+	my $B_random = dsum( $B*$w_star)/$w_star->dsum;
+	my $norm_w_random = $w_star/$w_star->dsum;
+	my $V_random = dsum($norm_w_random*$norm_w_random->transpose*$VarCov);
+	#	my $V_random = dsum($w_star*$w_star->transpose*$VarCov);
+	my $random_chi_square_df1 = ($B_random**2)/$V_random;
+	my $back =  {
+		'B_stouffer' => $B_stouffer,
+		'B_fix' => $B_fix,
+		'B_random' => $B_random,
+		'V_fix' => $V_fix,
+		'V_random' => $V_random,
+		'Chi_fix' => $fix_chi_square_df1,
+		'Chi_random' => $random_chi_square_df1,
+		'Q' => $Q,
+		'I2' => $I_squared,
+		'tau_squared' => $tau_squared,
+		'N' => $N,
+	};
+	return $back;
+}
 
 sub pearson_corr_genotypes {
   # implemented as in S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).

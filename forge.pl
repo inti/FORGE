@@ -274,7 +274,10 @@ if (defined $gc_correction){
 		print_OUT("   '-> Applying GC correction");
 		my $assoc_chis = [];
 		foreach my $snp (keys %assoc_data) {
-			next if ( $assoc_data{ $snp }->{ 'pvalue' } == 1);
+			if ( $assoc_data{ $snp }->{ 'pvalue' } == 1){
+				push @{ $assoc_chis }, $assoc_data{ $snp }->{ 'pvalue' };
+				next;
+			}
 			my $snp_chi = gsl_cdf_chisq_Pinv ( 1 - $assoc_data{ $snp }->{ 'pvalue' }, 1 );
 			$snp_chi /=  $gc_lambda;
 			$assoc_data{ $snp }->{ 'pvalue' }= 1 - gsl_cdf_chisq_P( $snp_chi, 1 );

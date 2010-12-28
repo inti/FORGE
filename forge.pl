@@ -625,33 +625,21 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
-	
-	# Calculate the genotypes correlation matrix
-	$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
-	  #if (defined $corr_ld){
-		  my $n = scalar @{$gene{$gn}->{'geno_mat_rows'}};
-		  $gene{$gn}->{cor_ld_r} = zeroes $n,$n; 
-		  $gene{$gn}->{cor_ld_r}->diagonal(0,1) .= 1;
-		  for (my $i = 0; $i < $n; $i++){
-			  for (my $j = $i; $j < $n; $j++){
-				  next if ($j == $i);
-				  my $ld = calculate_LD_stats([ $gene{$gn}->{'genotypes'}->(,$i)->list ],[ $gene{$gn}->{'genotypes'}->(,$j)->list ]);	
-				  set $gene{$gn}->{cor_ld_r}, $i, $j, $ld->{r};
-				  set $gene{$gn}->{cor_ld_r}, $j, $i, $ld->{r};
-			  }
-		  }
-	  #}
+
 	  
+	# Calculate the genotypes correlation matrix
+	  my $more_corrs = "";
+	($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation);
+	  %correlation = (%correlation,%{$more_corrs});
 	  # Calculate the weights for the gene
 	  $gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
-	  print $gene{$gn}->{weights};
 
 	  # calculate gene p-values
-	my $z_based_p = z_based_gene_pvalues($gene{$gn});
-	next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
-    my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
+		my $z_based_p = z_based_gene_pvalues($gene{$gn});
+		next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
+		my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
 
-	  print OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+		print OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 			$gene{$gn}->{pvalues}->min,
 			$pvalue_based_p->{sidak_min_p},
 			$pvalue_based_p->{fisher},
@@ -668,7 +656,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			$pvalue_based_p->{Meff_Galwey},
 			$pvalue_based_p->{Meff_gao},
 			$z_based_p->{'N'});
-	  print OUT "\n";
+		print OUT "\n";
 	  
 
 	push @LINES_OUT_SS, sample_score($gene{$gn},\%assoc_data) if (defined $sample_score);
@@ -797,6 +785,31 @@ sub deal_with_weights {
 	$back = $w_matrix/$w_matrix->sum;
 	return($back);
 	
+}
+sub deal_with_correlations {
+	my $gn = shift;
+	my $correlation = shift;
+	my %new_corrs = ();
+	my $pearson_cor = corr_table($gn->{genotypes});
+	my $n = scalar @{ $gn->{'geno_mat_rows'} };
+	my $cor_ld_r = zeroes $n,$n; 
+	$cor_ld_r->diagonal(0,1) .= 1;
+	for (my $i = 0; $i < $n; $i++){
+		for (my $j = $i; $j < $n; $j++){
+			next if ($j == $i);
+			if (exists $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]}){
+				set $cor_ld_r, $i, $j, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+				set $cor_ld_r, $j, $i, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+			} else {
+				my $ld = calculate_LD_stats([ $gn->{'genotypes'}->(,$i)->list ],[ $gn->{'genotypes'}->(,$j)->list ]);	
+				set $cor_ld_r, $i, $j, $ld->{r};
+				set $cor_ld_r, $j, $i, $ld->{r};
+				$new_corrs{ $gn->{'geno_mat_rows'}->[$i] }{ $gn->{'geno_mat_rows'}->[$j] } = $ld->{r};
+				$new_corrs{ $gn->{'geno_mat_rows'}->[$j] }{ $gn->{'geno_mat_rows'}->[$i] } = $ld->{r};
+			}
+		}
+	}
+	return($pearson_cor,$cor_ld_r,\%new_corrs);
 }
 
 sub z_based_gene_pvalues {

@@ -1666,14 +1666,17 @@ sub calculate_LD_stats {
 	#getc;
     my $D;
     my $r2;
+	my $r;
     eval{
 		$D  = ($nAB+(1-$theta)*$AaBb)/$N - ($f_A*$f_B);
 		$r2 = $D*$D/($f_A*$f_B*(1-$f_A)*(1-$f_B)); 
+		$r = $D/sqrt($f_A*$f_B*(1-$f_A)*(1-$f_B));
     };
 	
     if ($@){
 		$D = 0;
 		$r2 = 0; #for some cases is not possible to calculate the r2 due to a 0 in the divisor
+		$r = 0;
     }
     
     my $Dmax = 0;
@@ -1696,11 +1699,13 @@ sub calculate_LD_stats {
 	
 	$D = sclr $D;
 	$r2 = sclr $r2;
+	$r = sclr $r;
 	$N = sclr $N;
 	$d_prime = sclr $d_prime;
 	$theta = sclr $theta;
     my $o = { 'D'=> $D,
 		'r2' => $r2,
+		'r' => $r,
 		'theta' => $theta,
 		'N' =>  $N,
 		'd_prime' =>  $d_prime,
@@ -1709,7 +1714,6 @@ sub calculate_LD_stats {
     return $o;
 	
 }
-
 
 
 sub pearson_corr_genotypes {

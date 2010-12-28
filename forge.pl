@@ -643,17 +643,12 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 	  #}
 	  
 	  # Calculate the weights for the gene
-    if (defined @weights_file){
-        $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
-    } else {
-        my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
-        $gene{$gn}->{weights} = ones $n_snps;
-        $gene{$gn}->{weights} *= 1/$n_snps;
-        $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
-    }
-    # calculate gene p-values
+	  $gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
+	  print $gene{$gn}->{weights};
+
+	  # calculate gene p-values
 	my $z_based_p = z_based_gene_pvalues($gene{$gn});
-	  next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
+	next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
     my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
 
 	  print OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
@@ -766,6 +761,43 @@ if (defined $geno_probs) { unlink("$geno_probs.$$.idx");}
 
 print_OUT("Well Done!!");
 exit(0);
+sub deal_with_weights {
+	my $w_files = shift;
+	my $gn = shift;
+	my $w_by_maf =shift;
+	my $weights = shift;
+	my $back = null;
+	my $N = scalar @{ $gn->{geno_mat_rows} };
+	if (defined @$w_files){
+        $back = generate_weights_for_a_gene($gn->{geno_mat_rows},$weights);
+    } else {
+        $back = ones $N;
+        $back *= 1/$N;
+        $back /= $back->dsum;
+    }
+	
+	# if desired weigth by the 1/MAF
+	if (defined $w_by_maf){
+		my $MAF_w = get_maf_weights($gn->{genotypes});
+		$back *= $MAF_w->transpose;
+	}
+	
+	# Correct the weights by the LD in the gene.
+	# the new weight will be the weigthed mean of the gene.
+	# the new weight will be the weigthed mean of the gene weights.
+	# the weights for the mean are the correlation between the SNP, In that way the
+	# weights reflect the correlation pattern of the SNPs 
+	# weights reflect the correlation pattern of the SNPs
+	my $w_matrix = $back * abs($gn->{cor_ld_r}); # multiply the weights by the correaltions
+	my @dims = $w_matrix->dims();
+	$w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$back->dsum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
+	if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
+	$w_matrix /= $w_matrix->sum; # make sure weights sum 1
+	
+	$back = $w_matrix/$w_matrix->sum;
+	return($back);
+	
+}
 
 sub z_based_gene_pvalues {
 	my $gene = shift;
@@ -1157,24 +1189,21 @@ sub get_genotypes {
 sub gene_pvalue {
     my $gn = shift;
     if (defined $v){ print_OUT("____ $gn ____"); }
-    if (not defined $bfile){ @{ $gene{$gn}->{geno_mat_rows}} = @{ $gene{$gn}->{snps}}; }
     my $n_snps = scalar @{ $gene{$gn}->{geno_mat_rows}};
-    next if ($n_snps == 0);
     # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
-	if ($n_snps == 1){
-            if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
-            delete($gene{$gn});
-            return();
-        }
-    #if the user defined a genotype file then we need to get the number of SNPs in the gene.
-    # if the user did not defined neither a genotype nor a file with the SNP-SNP correlations exit the program
-    unless (defined $bfile or defined $spearman or defined $ped or defined $geno_probs) {
-        print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
-        exit(1);
-    }
-   
-   if (defined $v){ print_OUT($gene{$gn}->{cor});}
+	if ($n_snps < 2){
+		if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
+		printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
+		return({
+			'fisher' => -1,
+			'fisher_df' => -1,
+			'fisher_chi' => -1,
+			'sidak_min_p' => -1,
+			'Meff_gao' => -1,
+			'Meff_Galwey' => -1,
+		});
+	}
+
    if (defined $v){ print_OUT("Calculating effective number of tests: "); }
    # calculate number of effective tests by the Gao ($k) and Galwey ($Meff_galwey) method.	  
    my ($k,$Meff_galwey) = number_effective_tests(\$gene{$gn}->{cor});
@@ -1191,25 +1220,6 @@ sub gene_pvalue {
 
     if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]"); }
 
-    # if desired weigth by the 1/MAF
-    if (defined $w_maf){
-	my $MAF_w = get_maf_weights($gene{$gn}->{genotypes});
-	$gene{$gn}->{weights} *= $MAF_w->transpose;
-    }
-        
-    # Correct the weights by the LD in the gene.
-    # the new weight will be the weigthed mean of the gene.
-    # the new weight will be the weigthed mean of the gene weights.
-    # the weights for the mean are the correlation between the SNP, In that way the
-    # weights reflect the correlation pattern of the SNPs 
-    # weights reflect the correlation pattern of the SNPs
-    my $w_matrix = $gene{$gn}->{weights}*abs($gene{$gn}->{cor}); # multiply the weights by the correaltions
-    my @dims = $w_matrix->dims();
-    $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
-    if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
-    $w_matrix /= $w_matrix->sum; # make sure weights sum 1
-    
-    $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
 
    my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
    my $fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );

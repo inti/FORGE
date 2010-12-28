@@ -7,7 +7,7 @@ use PDL::GSL::CDF;
 use PDL::Primitive;
 use PDL::NiceSlice;
 use PDL::Stats::Basic;
-use PDL::LinearAlgebra;
+#use PDL::LinearAlgebra; # commented until re-implement the use of simulation to calculate p-values
 use PDL::Bad;
 use IO::File;
 use IO::Seekable;

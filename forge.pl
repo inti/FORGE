@@ -638,17 +638,17 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		my $z_based_p = z_based_gene_pvalues($gene{$gn});
 		next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
 		my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
-
+	  
 		print OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 			$gene{$gn}->{pvalues}->min,
 			$pvalue_based_p->{sidak_min_p},
 			$pvalue_based_p->{fisher},
 			$pvalue_based_p->{fisher_chi},
 			$pvalue_based_p->{fisher_df},
-			$z_based_p->{'Chi_fix'},
-			1 - gsl_cdf_chisq_P($z_based_p->{'Chi_fix'},1),
-			$z_based_p->{'Chi_random'},
-			1 - gsl_cdf_chisq_P($z_based_p->{'Chi_random'},1),
+			$z_based_p->{'Z_fix'},
+			gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_fix'}),
+			$z_based_p->{'Z_random'},
+			gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_random'}),
 			$z_based_p->{'I2'},
 			$z_based_p->{'Q'},
 			1- gsl_cdf_chisq_P($z_based_p->{'Q'},$z_based_p->{'N'}-1),
@@ -825,7 +825,7 @@ sub z_based_gene_pvalues {
 	
 	my $pvals = $gene->{'pvalues'};
 	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;
-	$pvals->index( which($pvals == 0)) .= double 2.2e-16;
+	$pvals->index( which($pvals == 0) ) .= double 2.2e-16;
 	my $B = -1*gsl_cdf_ugaussian_Pinv($pvals);
 	my $observed_stat = undef;
 	if (not defined $gene->{'effect_size_se'}){
@@ -1559,15 +1559,17 @@ sub get_fix_and_radom_meta_analysis {
 	} else {
 		$W = 1/$SE; 
 	}
-	
-	my  $B_stouffer = dsum($B*$W)/sqrt(dsum($W**2));
+
 	# calculate fix effect estimate
 	my $B_fix = dsum($B*$W)/$W->dsum;
 	my $norm_w_fix = $W/$W->dsum;
 	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
 	#my $V_fix = dsum($W*$W->transpose*$VarCov);
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
+	my $fix_Z = $B_fix/sqrt($V_fix);
 	
+	my $B_stouffer = dsum($B*$norm_w_fix)/sqrt($V_fix);
+
 	# calculate heteroogeneity parameter Q
 	my $Q = 0.0; 
 	{
@@ -1607,6 +1609,8 @@ sub get_fix_and_radom_meta_analysis {
 	my $V_random = dsum($norm_w_random*$norm_w_random->transpose*$VarCov);
 	#	my $V_random = dsum($w_star*$w_star->transpose*$VarCov);
 	my $random_chi_square_df1 = ($B_random**2)/$V_random;
+	my $random_Z = $B_random/sqrt($V_random);
+	
 	my $back =  {
 		'B_stouffer' => $B_stouffer,
 		'B_fix' => $B_fix,
@@ -1615,6 +1619,8 @@ sub get_fix_and_radom_meta_analysis {
 		'V_random' => $V_random,
 		'Chi_fix' => $fix_chi_square_df1,
 		'Chi_random' => $random_chi_square_df1,
+		'Z_fix' => $fix_Z,
+		'Z_random' => $random_Z,
 		'Q' => $Q,
 		'I2' => $I_squared,
 		'tau_squared' => $tau_squared,

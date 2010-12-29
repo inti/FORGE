@@ -122,7 +122,7 @@ if (defined $geno_probs){
 	open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
 	print OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
 	print OUT "\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df";
-	print OUT "\tZ_based_chi_fix\tZ_based_P_fix\tZ_based_chi_random\tZ_based_P_random";
+	print OUT "\tZ_fix\tZ_P_fix\tZ_random\tZ_P_random";
 	print OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 	print OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 #}

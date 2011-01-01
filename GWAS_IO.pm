@@ -192,6 +192,7 @@ sub read_map_and_ped {
 	#print_OUT("  '-> [ " . scalar @back_genotypes . " ] SNPs");
 	return(\@back_fam, \@back_genotypes,\@bim);
 }
+
 sub extract_genotypes_for_snp_list{
 	my $snp_list = shift;
 	my $line_index = shift;

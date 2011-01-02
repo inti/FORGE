@@ -27,8 +27,8 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
-@EXPORT_OK = qw(  get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
+@EXPORT = qw( get_maf get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
+@EXPORT_OK = qw( get_maf get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
 
 
 # this subroutine applies the makambi method to combine p-values from correlated test
@@ -296,27 +296,19 @@ sub calculate_LD_stats {
 		$iterations++;
     }
 	
-    # now calculate stats
-    #my ( $f_A, $f_B ) = major_freqs( \%people );
-	my ( $f_A, $f_B ) = 0;
-	my $n = 0;
-	map {  
-		if ($_ > 0){
-			$f_A += 2 if ($_ == 1);
-			$f_A += 1 if ($_ == 2);
-			$n++;
-		}
-	} @$first;
-    $f_A /= 2*$n;
-	$n = 0;
-	map {  
-		if ($_ > 0){
-			$f_B += 2 if ($_ == 1);
-			$f_B += 1 if ($_ == 2);
-			$n++;
-		}
-	} @$second;
-    $f_B /= 2*$n;
+	my ( $f_A ) = get_maf($first);
+	my ( $f_B ) = get_maf($second);
+	
+
+	if ($f_B == 0 or $f_A == 0 or $f_B == 1 or $f_A == 1){
+		return({ 'D'=> 0,
+			'r2' => 0,
+			'r' => 0,
+			'theta' => -1,
+			'N' =>  0,
+			'd_prime' =>  0,
+		});
+	}
 	
 	#	print "$f_A $f_B\n";
 	#getc;
@@ -371,6 +363,15 @@ sub calculate_LD_stats {
 	
 }
 
+sub get_maf {
+	my $a = shift;
+	if (ref($a) eq 'ARRAY'){
+		$a = pdl $a;
+	}
+	my $maf = (2*dsum( $a ==1 ) + 1*dsum( $a ==2 ) )/(2*dsum($a != 0));
+	if ($maf > 0.5){ $maf = 1 - $maf;}	
+	return($maf);
+}
 
 sub pearson_corr_genotypes {
 	# implemented as in S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).

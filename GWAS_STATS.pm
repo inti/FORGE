@@ -123,7 +123,7 @@ sub get_fix_and_radom_meta_analysis {
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
 	my $fix_Z = $B_fix/sqrt($V_fix);
 	
-	my $B_stouffer = dsum($B*$norm_w_fix)/sqrt($V_fix);
+	my $B_stouffer_fix = dsum($B*$norm_w_fix)/sqrt($V_fix);
 	
 	# calculate heteroogeneity parameter Q
 	my $Q = 0.0; 
@@ -166,8 +166,11 @@ sub get_fix_and_radom_meta_analysis {
 	my $random_chi_square_df1 = ($B_random**2)/$V_random;
 	my $random_Z = $B_random/sqrt($V_random);
 	
+	my $B_stouffer_random = dsum($B*$norm_w_random)/sqrt($V_random);
+
 	my $back =  {
-		'B_stouffer' => $B_stouffer,
+		'B_stouffer_fix' => $B_stouffer_fix,
+		'B_stouffer_random' => $B_stouffer_random,
 		'B_fix' => $B_fix,
 		'B_random' => $B_random,
 		'V_fix' => $V_fix,

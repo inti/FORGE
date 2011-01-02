@@ -279,20 +279,24 @@ sub calculate_LD_stats {
 		print  "Table: $genotypes{'AABB'}  $genotypes{'AaBB'} $genotypes{'aaBB'}\n";
 	    print  "Table: $genotypes{'AABb'}  $genotypes{'AaBb'} $genotypes{'aaBb'}\n";
 	    print  "Table: $genotypes{'AAbb'}  $genotypes{'Aabb'} $genotypes{'aabb'}\n";
+		print  "nAB [ $nAB ] nab [ $nab ] nAb [ $nAb ] naB [ $naB ] nAaBb [ $AaBb ]\n";
 	}
 	
     my $N = double $nAB + $nab + $nAb + $naB + 2*$AaBb;
-    my $theta = 0.5;
+    my $theta = double 0.5;
     my $thetaprev = 2;
    	my $iterations = 0;
     while( abs($theta-$thetaprev) > 0.0001 ) {	
 		$thetaprev = $theta;
-		eval{
+		eval {
 			$theta = (($nAb + $theta*$AaBb)*($naB + $theta*$AaBb))/
-		    (($nAB + (1-$theta)*$AaBb)*($nab + (1-$theta)*$AaBb) + 
-			($nAb + $theta*$AaBb)*($naB + $theta*$AaBb));
+		    (($nAB + (1-$theta)*$AaBb)*($nab + (1-$theta)*$AaBb) + ($nAb + $theta*$AaBb)*($naB + $theta*$AaBb));
 		};
+		if (defined $v){
+			print "iter: $iterations; theta [ $theta ]\n";
+		}
 		if ($@){ $theta = 0.5; } #included to avoid division by 0
+		if (isbad(setnantobad($theta))) { $theta = 0.5; }
 		$iterations++;
     }
 	
@@ -310,8 +314,6 @@ sub calculate_LD_stats {
 		});
 	}
 	
-	#	print "$f_A $f_B\n";
-	#getc;
     my $D;
     my $r2;
 	my $r;
@@ -347,17 +349,19 @@ sub calculate_LD_stats {
 	
 	$D = sclr $D;
 	$r2 = sclr $r2;
+	if (abs($r2) > 1){ $r2 = $r2/abs($r2); }
 	$r = sclr $r;
+	if (abs($r) > 1){ $r = $r/abs($r); }
 	$N = sclr $N;
 	$d_prime = sclr $d_prime;
 	$theta = sclr $theta;
+	
     my $o = { 'D'=> $D,
 		'r2' => $r2,
 		'r' => $r,
 		'theta' => $theta,
 		'N' =>  $N,
 		'd_prime' =>  $d_prime,
-		#'people' => scalar(keys %people)
 	};
     return $o;
 	

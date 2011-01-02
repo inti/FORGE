@@ -576,7 +576,9 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
       # store the genotypes.
       # if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
       # here i extract the number of genotypes corresponding to the number of samples
-      push @{ $matrix}, [@snp_genotypes[0..scalar @fam - 1]];
+		my $maf = get_maf([@snp_genotypes[0..scalar @fam - 1]] );
+		next if ($maf == 0 or $maf ==1); 
+      push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
       # add snp id to matrix row names
       push @{ $gene{$gn}->{geno_mat_rows} }, $bim[ $bim_ids{$mapped_snp} ]->{snp_id};
       # store the p-value of the snp

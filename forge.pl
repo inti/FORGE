@@ -67,7 +67,7 @@ pod2usage(0) if (not defined $assoc);
 my $LOG = new IO::File; 
 $LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$LOG) and exit(1);
 
-print_OUT("Check http://github.com/inti for updates",$LOG);
+print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
 print_OUT("LOG file will be written to [ $out.log ]",$LOG);
 
 # define distance threshold,

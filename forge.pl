@@ -731,10 +731,11 @@ if (defined $print_cor){
   close(COR);
 }
 
-# delete index file if one was created to read genotype prob files
-if (defined $geno_probs) { unlink("$geno_probs.$$.idx");} 
-
 print_OUT("Well Done!!",$LOG);
+
+$LOG->close();
+$OUT->close();
+
 exit(0);
 
 sub deal_with_weights {
@@ -792,6 +793,7 @@ sub deal_with_correlations {
 				my $ld = calculate_LD_stats([ $gn->{'genotypes'}->(,$i)->list ],[ $gn->{'genotypes'}->(,$j)->list ]);	
 				set $cor_ld_r, $i, $j, $ld->{r};
 				set $cor_ld_r, $j, $i, $ld->{r};
+				
 				$new_corrs{ $gn->{'geno_mat_rows'}->[$i] }{ $gn->{'geno_mat_rows'}->[$j] } = $ld->{r};
 				$new_corrs{ $gn->{'geno_mat_rows'}->[$j] }{ $gn->{'geno_mat_rows'}->[$i] } = $ld->{r};
 			}

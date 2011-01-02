@@ -77,7 +77,7 @@ sub z_based_gene_pvalues {
 	$pvals->index( which($pvals == 0) ) .= double 2.2e-16;
 	my $B = -1*gsl_cdf_ugaussian_Pinv($pvals);
 	my $observed_stat = undef;
-	if (not defined $gene->{'effect_size_se'}){
+	if (defined $gene->{'effect_size_se'}){
 		$observed_stat = get_fix_and_radom_meta_analysis($B,$gene->{'effect_size_se'},undef,$cov);
 	} else {
 		my $se = 1/$gene->{'weights'};
@@ -114,7 +114,6 @@ sub get_fix_and_radom_meta_analysis {
 	} else {
 		$W = 1/$SE; 
 	}
-	
 	# calculate fix effect estimate
 	my $B_fix = dsum($B*$W)/$W->dsum;
 	my $norm_w_fix = $W/$W->dsum;

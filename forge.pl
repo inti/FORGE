@@ -220,10 +220,10 @@ while (  my $a = <ASSOC> ) {
 		  $SE = $header{"U95"} - $header{"L95"};
 	  }
   }
-  if (exists $header{"BETA"}){ $BETA = $data[$header{"BETA"}];}
-  if (exists $header{"R2"}){ $R2 = $data[$header{"R2"}];}
-  if (exists $header{"STAT"}){ $STAT = $data[$header{"STAT"}];}
-  if (not defined $SE and exists $header{"SE"}){ $SE = $data[$header{"SE"}];}
+  if (exists $header{"BETA"}){ $BETA = $data[$header{"BETA"}]; }
+  if (exists $header{"R2"}){ $R2 = $data[$header{"R2"}]; }
+  if (exists $header{"STAT"}){ $STAT = $data[$header{"STAT"}]; }
+  if ((not defined $SE) and (exists $header{"SE"})){ $SE = $data[$header{"SE"}]; }
   my $effect = undef;
   if (exists $header{"OR"}){
     $effect = "or";
@@ -581,19 +581,19 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
       push @{ $gene{$gn}->{geno_mat_rows} }, $bim[ $bim_ids{$mapped_snp} ]->{snp_id};
       # store the p-value of the snp
       push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{pvalue}; 
-		my $effect_measure = $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure};
+		my $effect_measure = $assoc_data{ $mapped_snp }->{effect_size_measure};
 		if (defined $effect_measure){
 			if ($effect_measure eq 'or'){
-				push @{ $gene{$gn}->{effect_size} }, log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{$effect_measure};
+				push @{ $gene{$gn}->{effect_size} }, log $assoc_data{ $mapped_snp }->{$effect_measure};
 			} else {
-				push @{ $gene{$gn}->{effect_size} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{$effect_measure};
+				push @{ $gene{$gn}->{effect_size} }, $assoc_data{ $mapped_snp }->{$effect_measure};
 			}
-			if (defined $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se}){
+			if (defined $assoc_data{ $mapped_snp }->{se}){
 				if ($effect_measure eq 'or'){
 					#push @{ $gene{$gn}->{effect_size_se} }, abs log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se};
-					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure_se};
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
 				} else {
-					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{effect_size_measure_se};
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
 				}
 			}
 		}

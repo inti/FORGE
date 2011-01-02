@@ -614,7 +614,24 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 
 	  # calculate gene p-values
 		my $z_based_p = z_based_gene_pvalues($gene{$gn});
-		next if (ref($z_based_p) ne 'HASH' and $z_based_p == -9);
+		if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
+			$z_based_p = {
+				'B_stouffer_fix' => "NA",
+				'B_stouffer_random' => "NA",
+				'B_fix' => "NA",
+				'B_random' => "NA",
+				'V_fix' => "NA",
+				'V_random' => "NA",
+				'Chi_fix' => "NA",
+				'Chi_random' => "NA",
+				'Z_fix' => "NA",
+				'Z_random' => "NA",
+				'Q' => "NA",
+				'I2' => "NA",
+				'tau_squared' => "NA",
+				'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
+			};
+		}
 		my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
 	  
 		print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
@@ -633,7 +650,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			$z_based_p->{'tau_squared'},
 			$pvalue_based_p->{Meff_Galwey},
 			$pvalue_based_p->{Meff_gao},
-			$z_based_p->{'N'});
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
 		print $OUT "\n";
 	  
 

@@ -474,8 +474,73 @@ print_OUT("Starting to Calculate gene p-values",$LOG);
 unless (scalar keys %gene < 100){
   $report = int((scalar keys %gene)/100 + 0.5)*10;
 }
+# define array to store the output lines.
+# this allows to writte into this in chucks instead of line-by-line to speed up and 
+# avoid IO bottlenecks
+# 1 array for each analysis output will be define
+my @LINES_OUT_SS = ();
 
-if (defined $bfile) {
+# if user defined a genotypes file. read genotypes and store a genotype matrix (rows: samples, cols: genotypes)for each gene 
+if (defined $geno_probs) { # in case not plink binary files provided and only a genotype prob file is given
+	print_OUT("Reading genotype probabilities from [ $geno_probs ]",$LOG);
+	foreach my $gn (keys %gene){
+		my $snp_list = [];
+		my $lines = [];
+		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
+			next if (not exists $assoc_data{ $bim[$bim_ids{$mapped_snp}]->{snp_id} } );
+			if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn",$LOG); }
+			push @{$snp_list}, $mapped_snp;
+			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
+			push @{$gene{$gn}->{pvalues}}, $assoc_data{ $mapped_snp }->{pvalue};
+			push @{$lines}, $bim_ids{$mapped_snp} + 1;
+		}
+		my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold,$geno_probs_format,$gprobs,$gprobs_index);
+		$gene{$gn}->{genotypes} = $d_mat;
+		# check the range of the values. if the range is 0 then the SNP is monomorphic and shoudl be dropped
+		my ($min,$max,$min_d,$max_d)= $gene{$gn}->{genotypes}->minmaximum;
+		my $non_zero_variance_index = which(($max - $min) != 0);
+		# check if any SNPs needs to be dropped
+		if ($non_zero_variance_index->isempty()){
+			print_OUT(" [ $gn ] All SNPs are monomorphic, going to next gene",$LOG) if (defined $v);
+			next;
+		}
+		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
+		my $new_size = scalar list $non_zero_variance_index;
+		if ( $old_size != $new_size){
+			$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->(,$non_zero_variance_index);
+			$gene{$gn}->{geno_mat_rows} = [@{$gene{$gn}->{geno_mat_rows}}[$non_zero_variance_index->flat->list] ];
+			$gene{$gn}->{pvalues} = [@{$gene{$gn}->{pvalues}}[$non_zero_variance_index->flat->list] ];
+			if (defined $v){
+				my $diff = $old_size - $new_size;
+				print_OUT("Dropping [ $diff ] monomorphic SNPs",$LOG);
+			}
+		}
+		
+		#calculate the SNP-SNP correlation
+		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+		#### Calculate the weights for the gene
+		if (defined @weights_file){
+			$gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
+		} else {
+			my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
+			$gene{$gn}->{weights} = ones $n_snps;
+			$gene{$gn}->{weights} *= 1/$n_snps;
+			$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+		}
+		# Calculate average max genotype prob and use it as weitghs
+		$gene{$gn}->{weights} *= daverage $gene{$gn}->{genotypes};
+		$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+		
+		# calculate gene p-values
+		&gene_pvalue($gn) if (not defined $no_forge);
+		
+		# delete the gene's data to keep memory usage low
+		delete($gene{$gn});
+		$count++;
+		&report_advance($count,$report,"Genes");	
+		
+	}
+} elsif (defined $bfile) {
   print_OUT("Reading genotypes from [ $bfile.bed ]",$LOG);
   # open genotype file
   my $bed = new IO::File;

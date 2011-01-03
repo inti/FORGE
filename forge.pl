@@ -22,7 +22,8 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
     $ss_mean, $no_forge, $gc_correction,$g_prob_threshold,
-	$bgl_gprobs, $flush
+	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
+	$gmt_min_size,$gmt_max_size
 );
 
 GetOptions(
@@ -37,7 +38,7 @@ GetOptions(
    'genes=s' => \@genes,
    'all_genes'       => \$all_genes,
    'chr=s'	=> \$analysis_chr,  
-   'snpmap|m=s'      => \$snpmap,
+   'snpmap|m=s@'      => \$snpmap,
    'report=i'  => \$report,
    'correlation|cor=s' => \$spearman,
    'affy_to_rsid=s' => \$affy_to_rsid,
@@ -57,6 +58,11 @@ GetOptions(
    'ss_mean' => \$ss_mean,
    'no_forge' => \$no_forge,
    'flush=i' => \$flush,
+	'gmt=s@' =>	\$gmt,
+	'gmt_min_size=i' =>	\$gmt_min_size,
+	'gmt_max_size=i' =>	\$gmt_max_size,
+	'gene_type|type=s@' => \$include_gene_type,
+	'exclude_gene_type|exclude_type=s@' => \$exclude_gene_type, 
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -69,6 +75,10 @@ $LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$
 
 print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
 print_OUT("LOG file will be written to [ $out.log ]",$LOG);
+
+# defines min and max size for gene-set analyses
+defined $gmt_min_size or $gmt_min_size = 1;
+defined $gmt_max_size or $gmt_max_size = 999_999_999;
 
 # define distance threshold,
 defined $flush or $flush = 1000;
@@ -148,7 +158,7 @@ if ( not defined $all_genes ) { # in case user want to analyze all genes
 	print_OUT("Read Gene List command line [ @genes  ]",$LOG); 
   }
 } else {
-	print_OUT("Going to analyze all genes on [ $snpmap ] file.",$LOG); 
+	print_OUT("Going to analyze all genes on [ @$snpmap ] file.",$LOG); 
 }
 
 # Now lets going to read the affy id to rsid mapping. This is used to keep all ids in the
@@ -448,6 +458,85 @@ if (scalar keys %gene == 0){
         print_OUT("No genes mapped",$LOG);
         exit(1);
 }
+
+if (defined $gmt){
+	print_OUT("Readiing gene-set definitions",$LOG);
+	foreach my $gene_set_file (@$gmt){
+		print_OUT("  '-> Reading [ $gene_set_file ]",$LOG);
+		open (GMT,$gene_set_file) or print_OUT("I can not open [ $gene_set_file ] to read from.",$LOG) and die $!;
+		while (my $line = <GMT>){
+			chomp($line);
+			my ( $p_name, $p_desc, @p_genes ) = split( /\t+/, $line );
+			my @gene_with_snp = ();
+			# loop over the genes and check if the ids match with any with SNPs
+			foreach my $gn (@p_genes) {
+				if ( $gn =~ m/\// ) {
+					$gn =~ s/\s+//g;
+					my @genes = split( /\/{1,}/, $gn );
+					map {
+						if ( exists $ids_map{$_} ){
+							push @gene_with_snp, $ids_map{$_};
+						} elsif ( exists $gene{$_} ){
+							push @gene_with_snp, $_;
+						} else {
+							next;
+						}
+					} @genes;
+				} else {
+					if ( exists $ids_map{$gn} ){
+						push @gene_with_snp, $ids_map{$gn};
+					} elsif ( exists $gene{$gn} ){
+						push @gene_with_snp, $gn;
+					} else {
+						next;
+					}
+				}
+			}
+			#next if (scalar @gene_with_snp < $gmt_min_size);
+			#next if (scalar @gene_with_snp > $gmt_max_size);
+			my %tmp = ();
+			map { $tmp{$_} = ""; } @gene_with_snp;
+			@gene_with_snp = keys %tmp; 
+			
+			%tmp = ();
+			my ($chrs,$starts,$ends) = "";
+			
+			foreach my $g (@gene_with_snp) { 
+				$chrs .= $gene{$g}->{chr};
+				$starts .= $gene{$g}->{start};
+				$ends .= $gene{$g}->{end};
+				foreach my $s (@{ $gene{$g}->{snps} }){
+					$tmp{$s} = "";				
+				}
+			}
+			my @p_snps = keys %tmp;
+			
+			$gene{$p_name} = {
+				'chr'       => $chrs,
+				'start'     => $starts,
+				'end'       => $ends,
+				'gene_type' => 'gene_set',
+				'snps'      => [@p_snps],
+				'minp'      => -9,
+				'genotypes' => null,
+				'geno_mat_rows' => [],
+				'cor' => null,
+				'weights' => null,
+				'pvalues' => [],
+				'effect_size' => [],
+				'effect_size_se' => [],
+				'gene_status' => 'KNOWN',
+				'ensembl' => $p_name,
+				'hugo' => $p_desc,
+				'desc' => $p_desc,
+				'name' => $p_name,
+				'genes' => [@gene_with_snp],
+			};
+		}
+	}
+
+}
+
 
 # start a hash to store the SNP-to-SNP correlation values
 my %correlation = ();

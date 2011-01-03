@@ -925,7 +925,7 @@ sub gene_pvalue {
    my $fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
 	
-	my $sidak = sclr double 1-(1-$gene{$gn}->{minp})**$k;
+	my $sidak = sclr double 1-(1- $gene{$gn}->{pvalues}->min)**$k;
 	$forge_df = sclr $forge_df;
 	$forge_chi_stat = sclr $forge_chi_stat;
 	my $back = {

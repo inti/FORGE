@@ -848,6 +848,17 @@ sub generate_weights_for_a_gene {
     return($W);
 }
 
+sub make_file_name_array {
+	my $file = shift;
+	my @back = ();
+	my @body = split(/\#/,$file);
+	for my $chr (1..26){
+		push @back, join "$chr", @body;
+	}
+	return([@back]);
+}
+
+
 # usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
 sub build_index {
     my $data_file  = shift;

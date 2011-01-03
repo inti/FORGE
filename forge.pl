@@ -339,6 +339,10 @@ my %gene = ();
 my %snp_to_gene = ();
 my %ids_map = ();
 foreach my $snp_gene_mapping_file (@$snpmap){
+	if (not -e $snp_gene_mapping_file){
+		print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
+		next;
+	}
 	open( MAP, $snp_gene_mapping_file ) or print_OUT("Can not open [ $snp_gene_mapping_file ] file",$LOG) and exit(1);
 	print_OUT("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
 	while ( my $read = <MAP> ) {
@@ -601,9 +605,9 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		next if ($maf == 0 or $maf ==1); 
       push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
       # add snp id to matrix row names
-      push @{ $gene{$gn}->{geno_mat_rows} }, $bim[ $bim_ids{$mapped_snp} ]->{snp_id};
+      push @{ $gene{$gn}->{geno_mat_rows} }, $mapped_snp;
       # store the p-value of the snp
-      push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{pvalue}; 
+      push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $mapped_snp }->{pvalue}; 
 		my $effect_measure = $assoc_data{ $mapped_snp }->{effect_size_measure};
 		if (defined $effect_measure){
 			if ($effect_measure eq 'or'){
@@ -796,6 +800,8 @@ sub deal_with_weights {
 	return($back);
 	
 }
+	
+
 sub deal_with_correlations {
 	my $gn = shift;
 	my $correlation = shift;

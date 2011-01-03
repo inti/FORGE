@@ -21,7 +21,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
-    $ss_mean, $no_forge, $gc_correction,$g_prob_threshold,
+    $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size
 );
@@ -56,7 +56,6 @@ GetOptions(
    'g_prob_threshold=f' => \$g_prob_threshold,
    'weight_by_maf|w_maf' => \$w_maf,
    'ss_mean' => \$ss_mean,
-   'no_forge' => \$no_forge,
    'flush=i' => \$flush,
 	'gmt=s@' =>	\$gmt,
 	'gmt_min_size=i' =>	\$gmt_min_size,
@@ -727,7 +726,7 @@ if (defined $bfile) {
 		$z_based_p->{'Q_P'} = 1- gsl_cdf_chisq_P($z_based_p->{'Q'},$z_based_p->{'N'}-1);
 	
 	}
-	my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
+	my $pvalue_based_p = gene_pvalue($gn);
 
 	print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 		$gene{$gn}->{pvalues}->min,
@@ -794,7 +793,7 @@ if (defined $bfile) {
 		}
 		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
 			
-	  &gene_pvalue($gn) if (not defined $no_forge);
+	  &gene_pvalue($gn);
 
 			delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
@@ -1166,9 +1165,8 @@ script [options]
 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
 	-lambda			lambda value to correct SNP statistics, if genomic control is used
 	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
-	-no_forge		Do not do a forge analysis. e.g. if only performing sample-scoring
 	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2
-	-gmt_max_size		Max number of genes in gene-sets to be analysed. default = 2
+	-gmt_max_size		Max number of genes in gene-sets to be analysed. default = 999999999
 
 	Weigthing
 	-weights, -w            File with SNP weights
@@ -1284,17 +1282,13 @@ lambda value to correct SNP statistics, if genomic control is used
 
 Correct the SNP pvalues by the genomic control method. It will calculate the lambda from the data itself. PLEASE MAKE SURE YOU DO NOT FILTER THE SNPS BEFORE RUNNING FORGE OR THE CORRECTION MAY BE ERRONEOUS.
 
-=item B<-no_forge>
-
-Do not do a forge analysis. e.g. if only performing sample-scoring
-
 =item B<-gmt_min_size>
  
 Min number of genes in gene-sets to be analysed. default = 2
 
 =item B<-gmt_max_size>
  
-Max number of genes in gene-sets to be analysed. default = 2
+Max number of genes in gene-sets to be analysed. default = 999999999
 
 =item B<-weights, -w>
 
@@ -1312,11 +1306,23 @@ Indicate if the SNP weight file has a header.
 
 Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
  
-=back
 
-=head1 DESCRIPTION
-
+=head2 DESCRIPTION
+ 
 TODO
 
+=head3 Examples
+ 
+=item B<1. Basic Analysis>
+ 
+To perform a basic gene-based testing with the example files run:
+ 
+>perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test
 
-=cut
+=item B<2. Adding gene-sets to the analysis>
+ 
+To perform a basic gene-based testing with the example files run:
+
+>perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -gmt example/example.gmt
+ 
+

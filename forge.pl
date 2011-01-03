@@ -1,26 +1,29 @@
 #!/usr/bin/perl -w
 use strict;
 use Getopt::Long;
+use Pod::Usage;
 use PDL;
+use PDL::Matrix;
 use PDL::GSL::CDF;
 use PDL::Primitive;
 use PDL::NiceSlice;
 use PDL::Stats::Basic;
+#use PDL::LinearAlgebra; # commented until re-implement the use of simulation to calculate p-values
 use PDL::Bad;
-use IO::File;
-use IO::Seekable;
-use Fcntl;
 use Data::Dumper;
-use Pod::Usage;
 
-my $VERSION = "0.9.5.5";
-
+# Load local functions
+use GWAS_IO;
+use GWAS_STATS;
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
     $print_cor, $pearson_genotypes,$distance, $sample_score,
-    $ped, $map, $ox_gprobs,
+    $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
+    $ss_mean, $no_forge, $gc_correction,$g_prob_threshold,
+	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
+	$gmt_min_size,$gmt_max_size
 );
 
 GetOptions(
@@ -35,12 +38,13 @@ GetOptions(
    'genes=s' => \@genes,
    'all_genes'       => \$all_genes,
    'chr=s'	=> \$analysis_chr,  
-   'snpmap|m=s'      => \$snpmap,
+   'snpmap|m=s@'      => \$snpmap,
    'report=i'  => \$report,
    'correlation|cor=s' => \$spearman,
    'affy_to_rsid=s' => \$affy_to_rsid,
    'verbose|v' => \$v,
    'lambda=f' => \$lambda,
+   'gc_correction' => \$gc_correction,
    'print_cor' => \$print_cor,
    'pearson_genotypes' => \$pearson_genotypes,
    'distance|d=i' => \$distance, 
@@ -48,80 +52,113 @@ GetOptions(
    'weights|w=s' => \@weights_file,
    'w_header' => \$w_header,
    'ox_gprobs=s' => \$ox_gprobs,
+   'bgl_gprobs=s' => \$bgl_gprobs,
+   'g_prob_threshold=f' => \$g_prob_threshold,
+   'weight_by_maf|w_maf' => \$w_maf,
+   'ss_mean' => \$ss_mean,
+   'no_forge' => \$no_forge,
+   'flush=i' => \$flush,
+	'gmt=s@' =>	\$gmt,
+	'gmt_min_size=i' =>	\$gmt_min_size,
+	'gmt_max_size=i' =>	\$gmt_max_size,
+	'gene_type|type=s@' => \$include_gene_type,
+	'exclude_gene_type|exclude_type=s@' => \$exclude_gene_type, 
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
 pod2usage(-exitstatus => 2, -verbose => 1) if (defined $man);
 pod2usage(0) if (not defined $assoc);
-open (LOG,">$out.log") or print_OUT("I can not open [ $out.log ] to write to") and exit(1);
-print_OUT("FORGE version [ $VERSION ]. See http://github.com/inti for updates");
-print_OUT("LOG file will be written to [ $out.log ]");
+
+
+my $LOG = new IO::File; 
+$LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$LOG) and exit(1);
+
+print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
+print_OUT("LOG file will be written to [ $out.log ]",$LOG);
+
+# defines min and max size for gene-set analyses
+defined $gmt_min_size or $gmt_min_size = 2;
+defined $gmt_max_size or $gmt_max_size = 999_999_999;
+
+# define distance threshold,
+defined $flush or $flush = 1000;
 
 # define distance threshold,
 defined $distance or $distance = 20;
-print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb");
+print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
 
 # $report is use to specify how often report the advance when reading input files
 defined $report or $report = 50_000;
 # tell if analysis is restricted to a specific chromosome
-defined $analysis_chr and print_OUT("Restricting analysis to chromosome [ $analysis_chr ]");
+defined $analysis_chr and print_OUT("Restricting analysis to chromosome [ $analysis_chr ]",$LOG);
 #  defined lambda value for Genomic Control correction
 defined $lambda or $lambda = 1;
+# defined threshold value for genotype probabilities
+defined $g_prob_threshold or $g_prob_threshold = 1.0;
 # tell if user wants to print the *.correlation file 
-defined $print_cor and print_OUT("Defined -print_cor: I will print the *.correlation file (it is bulky)");
+defined $print_cor and print_OUT("Defined -print_cor: I will print the *.correlation file (it is bulky)",$LOG);
 #set output file if not set already.
 defined $out or $out = "gene_based_fisher_v041.OUT";
 # tell if user wants to correct p-values by genomic control 
-if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]");}
+if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]",$LOG);}
 
 my $geno_probs = undef;
-if (defined $ox_gprobs and defined $sample_score) {
+my $geno_probs_format = undef;
+if (defined $ox_gprobs) {
     $geno_probs = $ox_gprobs ;
-    print_OUT("Genotype probabilities in OXFORD format will be read from [ $geno_probs ]");
+	$geno_probs_format = 'OXFORD';
+    print_OUT("Genotype probabilities in OXFORD format will be read from [ $geno_probs ]",$LOG);
+} elsif (defined $bgl_gprobs) {
+    $geno_probs = $bgl_gprobs ;
+	$geno_probs_format = 'BEAGLE';
+    print_OUT("Genotype probabilities in BEAGLE format will be read from [ $geno_probs ]",$LOG);
 }
 
 my ($gprobs, $gprobs_index);
-if (defined $geno_probs and defined $sample_score){
+if (defined $geno_probs){
     $gprobs = IO::File->new();
     $gprobs_index = IO::File->new();
-    
-#    if (not -e "$geno_probs.idx") {
-    print_OUT("   '-> Making index for genotype probabilities in [ $geno_probs.idx ] file");
-    $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
-    $gprobs_index->open("+>$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n");
-    build_index(*$gprobs, *$gprobs_index);
-        
-=head    } else {
-        print_OUT("   '-> Found [ $geno_probs.idx ] file, will use it to read the genotype probabilities. Please delete if you do not want to use this file.");
-        $gprobs->open("<$geno_probs") or print_OUT("I can not open binary PLINK file [ $geno_probs ]") and exit(1);
-        $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $geno_probs.idx for read/write: $!\n") and exit(1);
+    my $index_name = "$geno_probs.idx";
+     $gprobs->open("<$geno_probs") or print_OUT("I can not open genotype probability file [ $geno_probs ]",$LOG) and exit(1);
+    if (not -e "$geno_probs.idx") {
+    	print_OUT("   '-> Making index for genotype probabilities in [ $index_name ] file",$LOG);
+    	$gprobs_index->open("+>$index_name") or print_OUT("Can't open $index_name for read/write: $!\n",$LOG);
+    	build_index(*$gprobs, *$gprobs_index);
+    } else {
+        print_OUT("   '-> Found [ $geno_probs.idx ] file for genotype probabilities",$LOG);
+        $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $index_name for read/write: $!\n",$LOG) and exit(1);
+	binmode($gprobs_index);
     }
-=cut
 } 
 
-open (OUT,">$out") or print_OUT("I can not open [ $out ] to write to") and exit(1);
-print OUT  "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df\tn_snps\tn_effective_tests\n";
+my $OUT = new IO::File; 
+$OUT->open(">$out") or print_OUT("I can not open [ $out ] to write to",$LOG) and exit(1);
 
+print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
+print $OUT "\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df";
+print $OUT "\tZ_fix\tZ_P_fix\tZ_random\tZ_P_random";
+print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
+print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){
   $all_genes = 1;
-  print_OUT("Note: You did not provide an option for the set of genes to be analyzed. I will analyze all genes covered by the SNP association file. Check documentation for options -genes and -gene_list otherwise");
+  print_OUT("Note: You did not provide an option for the set of genes to be analyzed. I will analyze all genes covered by the SNP association file. Check documentation for options -genes and -gene_list otherwise",$LOG);
 }
 
 if ( not defined $all_genes ) { # in case user want to analyze all genes
   if ( not defined @genes ) { # in case user gave a list of genes in the command line
-    print_OUT("Reading Gene List from [ $gene_list ]");
+    print_OUT("Reading Gene List from [ $gene_list ]",$LOG);
     # read file with gene list and store gene names.
-    open( GL, $gene_list ) or print_OUT("I can not open [ $gene_list ]") and exit(1);
+    open( GL, $gene_list ) or print_OUT("I can not open [ $gene_list ]",$LOG) and exit(1);
     @genes = <GL>;
     chomp(@genes);
     close(GL);
   } else { 
-	print_OUT("Read Gene List command line [ @genes  ]"); 
+	print_OUT("Read Gene List command line [ @genes  ]",$LOG); 
   }
 } else {
-	print_OUT("Going to analyze all genes on [ $snpmap ] file."); 
+	print_OUT("Going to analyze all genes on [ @$snpmap ] file.",$LOG); 
 }
 
 # Now lets going to read the affy id to rsid mapping. This is used to keep all ids in the
@@ -129,7 +166,7 @@ if ( not defined $all_genes ) { # in case user want to analyze all genes
 my %affy_id = ();
 if ( defined $affy_to_rsid ) { # if conversion file is defined
    print_OUT("Reading AFFY to rsID mapping from [ $affy_to_rsid ]");
-   open( AFFY, $affy_to_rsid ) or print_OUT("I can not open [ $affy_to_rsid ]") and exit(1);
+   open( AFFY, $affy_to_rsid ) or print_OUT("I can not open [ $affy_to_rsid ]",$LOG) and exit(1);
    while (my $affy = <AFFY>){
       chomp($affy);
       my @b = split(/\t+/,$affy);
@@ -139,10 +176,12 @@ if ( defined $affy_to_rsid ) { # if conversion file is defined
 }
 
 # Read file with genetic association results.
-print_OUT("Reading association file: [ $assoc ]");
+print_OUT("Reading association file: [ $assoc ]",$LOG);
 # create hash to store SNP information
+my $assoc_chis = [] if (defined $gc_correction);
+
 my %assoc_data = ();
-open( ASSOC, $assoc ) or print_OUT("I can not open [ $assoc ]") and exit(1);
+open( ASSOC, $assoc ) or print_OUT("I can not open [ $assoc ]",$LOG) and exit(1);
 my $line = 0;
 my %header = ();
 while (  my $a = <ASSOC> ) {
@@ -158,8 +197,8 @@ while (  my $a = <ASSOC> ) {
       next;
    }
    # In case there is not cols with SNP and P names.
-   exists $header{"SNP"} or print_OUT("Not p-value columns available, these are the headers i found [ " . (keys %header) . " ]") and exit(1);
-   exists $header{"P"} or print_OUT("Not p-value columns available, these are the headers i found [ " . (keys %header) . " ]") and exit(1);
+   exists $header{"SNP"} or print_OUT("Not p-value columns available, these are the headers i found [ " . (keys %header) . " ]",$LOG) and exit(1);
+   exists $header{"P"} or print_OUT("Not p-value columns available, these are the headers i found [ " . (keys %header) . " ]",$LOG) and exit(1);
    # if there is a cols specifying the association test done. Only use result from ADD tests, this is only for compatibility with PLINK 
   if ( exists $header{"TEST"}){
       next if ( $data[$header{"TEST"}] ne "ADD");
@@ -176,39 +215,98 @@ while (  my $a = <ASSOC> ) {
    next if ( $data[$header{"P"}] eq "");
    
    #generate a pseudo-hash for each snp with the association info
-   # correct for genomic control if a lambda > 1 was specified.
   my $A2 = "NA";
   my $A1 = "NA";
   my $OR = 1;
+	my $SE = undef;
+  my $BETA = undef;
+  my $R2 = undef;
+  my $STAT = undef;
   if (exists $header{"A2"}){ $A2 = $data[$header{"A2"}];}
   if (exists $header{"A1"}){ $A1 = $data[$header{"A1"}];}
-  if (exists $header{"OR"}){ $OR = $data[$header{"OR"}];}
-   $assoc_data{ $data[$header{"SNP"}] } = {
-                				'pvalue' => 1 ,
-						'id' => $data[$header{"SNP"}],
-						'or' => $OR,
-						'a1' => $A1,
-						'a2' => $A2,
+  if (exists $header{"OR"}){ 
+	  $OR = $data[$header{"OR"}];
+	  if ((exists $header{"L95"}) and (exists $header{"U95"})){ 
+		  $SE = $header{"U95"} - $header{"L95"};
+	  }
+  }
+  if (exists $header{"BETA"}){ $BETA = $data[$header{"BETA"}]; }
+  if (exists $header{"R2"}){ $R2 = $data[$header{"R2"}]; }
+  if (exists $header{"STAT"}){ $STAT = $data[$header{"STAT"}]; }
+  if ((not defined $SE) and (exists $header{"SE"})){ $SE = $data[$header{"SE"}]; }
+  my $effect = undef;
+  if (exists $header{"OR"}){
+    $effect = "or";
+  } elsif (exists $header{"BETA"}){
+        $effect = "beta";
+  } elsif (exists $header{"STAT"}){
+        $effect = "stat";
+  }
+  # do some checking
+  if (defined $sample_score){
+    # if there are not direction of effect defined quite analysis and spit and error.
+    if (not defined $effect){
+        print_OUT("ERROR: No effect size measure or direction of effect provided. I can not perform Sample Score analysis",$LOG);
+        print_OUT("ERROR: Please provide an odd-ratio, beta or regression coefficient value under the header OR, BETA or STAT, respectively",$LOG);
+        exit(1);
+    } 
+  }
+  $assoc_data{ $data[$header{"SNP"}] } = {
+                                        'pvalue' => 1 ,
+                                        'id' => $data[$header{"SNP"}],
+                                        'a1' => $A1,
+                                        'a2' => $A2,
+                                        'or' => $OR,
+										'se' => $SE,
+                                        'beta' => $BETA,
+                                        'stat' => $STAT,
+                                        'r2' => $R2,
+                                        'effect_size_measure' => $effect,
         				};
-   
+   # correct for genomic control if a lambda > 1 was specified.   
    if ($lambda == 1) {
+   	push @{ $assoc_chis }, $data[$header{"P"}];
 	$assoc_data{ $data[$header{"SNP"}] }->{'pvalue'} = $data[$header{"P"}];
    } elsif ($lambda > 1) {# transform the p-value on a chi-square, correct it by the inflation factor and transform it again on a p-value 
-   	$assoc_data{ $data[$header{"SNP"}] }->{ 'pvalue' }= 1-  gsl_cdf_chisq_P( gsl_cdf_chisq_Pinv( $data[$header{"P"}], 1 )/$lambda, 1 );
+   	$assoc_data{ $data[$header{"SNP"}] }->{ 'pvalue' }= 1 - gsl_cdf_chisq_P( gsl_cdf_chisq_Pinv( $data[$header{"P"}], 1 )/$lambda, 1 );
    } else { 
-	print_OUT("\nPlease check the lambda value is correct\n");
+	print_OUT("\nPlease check the lambda value is correct\n",$LOG);
 	exit(1);
-   }
-   
-   
+   }  
 }
 close(ASSOC);
 
 if (scalar keys %assoc_data == 0){ 
-	print_OUT("\nNo SNPs with genetic association to used in the analysis\n");
+	print_OUT("\nNo SNPs with genetic association to used in the analysis\n",$LOG);
 	exit(1);
 }
-print_OUT("[ " . scalar (keys %assoc_data) . " ] SNPs with association data");
+print_OUT("[ " . scalar (keys %assoc_data) . " ] SNPs with association data",$LOG);
+
+# Genomic Control adjustment
+if (defined $gc_correction){
+	print_OUT("Calculating lambda for genomic control correction",$LOG);
+	my $gc_lambda = get_lambda_genomic_control($assoc_chis);
+	print_OUT("   '-> lambda (median) of [ $gc_lambda ]",$LOG);
+	if ($gc_lambda > 1){
+		print_OUT("   '-> Applying GC correction",$LOG);
+		my $assoc_chis = [];
+		foreach my $snp (keys %assoc_data) {
+			if ( $assoc_data{ $snp }->{ 'pvalue' } == 1){
+				push @{ $assoc_chis }, $assoc_data{ $snp }->{ 'pvalue' };
+				next;
+			}
+			my $snp_chi = gsl_cdf_chisq_Pinv ( 1 - $assoc_data{ $snp }->{ 'pvalue' }, 1 );
+			$snp_chi /=  $gc_lambda;
+			$assoc_data{ $snp }->{ 'pvalue' }= 1 - gsl_cdf_chisq_P( $snp_chi, 1 );
+			push @{ $assoc_chis }, $assoc_data{ $snp }->{ 'pvalue' };
+		}
+		$gc_lambda = get_lambda_genomic_control($assoc_chis);
+		print_OUT("   '-> After correction the lambda is [ $gc_lambda ]",$LOG);
+	} else {
+		print_OUT("   '-> GC correction not applied because lambda is less than 1",$LOG);
+	}
+}
+
 
 #read snp-to-gene mapping and store in a hash with key equal gene name and value
 # an array with the snps in the gene.
@@ -216,15 +314,23 @@ my @bim = ();
 my @fam = ();
 my $ped_map_genotypes;
 if (defined $bfile) {
-  # read the bim file with snp information and fam file with sample information
-  @bim = @{ read_bim("$bfile.bim") };
-  @fam = @{ read_fam("$bfile.fam") };
+	# read the bim file with snp information and fam file with sample information
+	@bim = @{ read_bim("$bfile.bim",$affy_to_rsid,\%affy_id) };
+	@fam = @{ read_fam("$bfile.fam") };
+	print_OUT("[ " . scalar @bim .  " ] SNPs and [ " . scalar @fam .  " ] samples in genotype file",$LOG);
 } elsif (defined $ped and defined $map){
-  my ($fam_ref,$bim_ref);
-  ($fam_ref,$ped_map_genotypes,$bim_ref) = read_map_and_ped($ped,$map);
-  @fam = @$fam_ref;
-  @bim = @$bim_ref;
+	my ($fam_ref,$bim_ref);
+	($fam_ref,$ped_map_genotypes,$bim_ref) = read_map_and_ped($ped,$map,$affy_to_rsid,\%affy_id);
+	@fam = @$fam_ref;
+	@bim = @$bim_ref;
+print_OUT("[ " . scalar @bim .  " ] SNPs and [ " . scalar @fam .  " ] samples in genotype file",$LOG);
+} elsif (defined $geno_probs){
+	print_OUT("Getting list of genotyped SNPs from [ $geno_probs ]",$LOG);
+	@bim = @{ get_snp_list_from_ox_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'OXFORD');
+	@bim = @{ get_snp_list_from_bgl_format($gprobs, $gprobs_index) } if ($geno_probs_format eq 'BEAGLE');
+	print_OUT("[ " . scalar @bim .  " ] SNPs in genotype file",$LOG);
 }
+
 my %bim_ids = ();
 my $index = 0;
 map {
@@ -232,110 +338,240 @@ map {
   $index++;
 } @bim;
 
+print_OUT("Loading SNP-2-Gene mapping");
 
-print_OUT("Reading gene to SNP mapping file from [ $snpmap ]");
+for (my $i = 0; $i < scalar @$snpmap; $i++){
+	if ($snpmap->[$i] =~ m/\#/){
+		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes.");
+		push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
+		splice(@$snpmap,$i,1);
+	}
+}
 
-open( MAP, $snpmap ) or print_OUT("Can not open [ $snpmap ] file") and exit(1);
 my %gene = ();
 my %snp_to_gene = ();
-while ( my $read = <MAP> ) {
-  chomp($read);
-  # the line is separate in gene info and snps. the section are separated by a tab.
-  my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
-  my @first_snp_n_fields =  split(/\:/,$m[0]);
-  if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
+my %ids_map = ();
+foreach my $snp_gene_mapping_file (@$snpmap){
+	if (not -e $snp_gene_mapping_file){
+		print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
+		next;
+	}
+	open( MAP, $snp_gene_mapping_file ) or print_OUT("Can not open [ $snp_gene_mapping_file ] file",$LOG) and exit(1);
+	print_OUT("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+	while ( my $read = <MAP> ) {
+	  chomp($read);
+	  # the line is separate in gene info and snps. the section are separated by a tab.
+	  my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
+	  my @first_snp_n_fields =  split(/\:/,$m[0]);
+	  if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 
-  # get all mapped snps within the distance threshold,
-  my @mapped_snps = ();
-  foreach my $s (@m) {
-    my ($id,$pos,$allele,$strand) = split(/\:/,$s);
-    next if (not defined $id);
-    if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-    elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
-  }
-   
-   next if (scalar @mapped_snps == 0);
-   # get the gene position info
-   #check if gene was in the list of genes i want to analyze
-   unless ( defined $all_genes ) {
-      next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
-   }
-   if (defined $analysis_chr){
-	next if ($analysis_chr ne $chr);
-   }
-   # create a pseudo-hash with the gene info
-   $gene{$ensembl} = {
-      	'hugo'      => $hugo,
-	'ensembl'   => $ensembl,	
-      	'chr'       => $chr,
-      	'start'     => $start,
-      	'end'       => $end,
-      	'gene_type' => $gene_type,
-      	'snps'      => [],
-      	'minp'      => -9,
-      	'genotypes' => null,
-      	'geno_mat_rows' => [],
-        'weights' => null,
-	'pvalues' => [],
-	'gene_status' => $gene_status,
-	'desc' => $description,
-   };
+	  # get all mapped snps within the distance threshold,
+	  my @mapped_snps = ();
+	  foreach my $s (@m) {
+		my ($id,$pos,$allele,$strand) = split(/\:/,$s);
+		next if (not defined $id);
+		if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
+		elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
+	  }
+	   
+	   next if (scalar @mapped_snps == 0);
+	   # get the gene position info
+	   #check if gene was in the list of genes i want to analyze
+	   unless ( defined $all_genes ) {
+		  next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
+	   }
+	   if (defined $analysis_chr){
+		next if ($analysis_chr ne $chr);
+	   }
+		
+	   # create a pseudo-hash with the gene info
+	   $gene{$ensembl} = {
+			'hugo'      => $hugo,
+			'ensembl'   => $ensembl,	
+			'chr'       => $chr,
+			'start'     => $start,
+			'end'       => $end,
+			'gene_type' => $gene_type,
+			'snps'      => [],
+			'minp'      => -9,
+			'genotypes' => null,
+			'geno_mat_rows' => [],
+			'cor' => null,
+			'weights' => null,
+			'pvalues' => [],
+			'effect_size' => undef,
+			'effect_size_se' => undef,
+			'gene_status' => $gene_status,
+			'desc' => $description,
+	   };
 
-   # go over mapped snps and change convert affy ids to rsid.
-   # and make a non-redundant set.
-   my %nr_snps = ();
-   foreach my $s (@mapped_snps) {
-      if ( defined $affy_to_rsid ) {
-         if ($s !~ m/^rs/){
-            if (exists $affy_id{$s}){ $s = $affy_id{$s};}
-         }
-      }
-	  # exclude snps not in the association file nor in the bim file
-	  next unless ( exists $assoc_data{$s} );
-	  next unless ( exists $bim_ids{$s});
-	  $nr_snps{$s} = "";
-   }
-   @mapped_snps = keys %nr_snps;
-   
-   # go over the snps mapped to the gene and check if they are in the map
-   # and association files. If so, store the min p-value for the gene.
-   # if any of the snps is in the files the remove the gene from the analysis.
-   foreach my $s (@mapped_snps) {
-	  if (defined $v ){ print_OUT("Mapping [ $s ] to [ $ensembl ]");}
-	  next if ( grep $_ eq $s, @{ $gene{$ensembl}->{snps} } );
-      push @{ $snp_to_gene{$s} }, $ensembl;
-      push @{ $gene{$ensembl}->{snps} }, $s;	
-      if ( $gene{$ensembl}->{minp} == -9) {
-         $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-      } elsif ( $assoc_data{$s}->{pvalue} < $gene{$ensembl}->{minp} ) {
-         $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-      }
-   }
-   # remove gene if none of its snps is in the analysis.
-   if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { delete( $gene{$ensembl} ) }
-   else { 
-	if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs"); }
-   }
-   
+	   # go over mapped snps and change convert affy ids to rsid.
+	   # and make a non-redundant set.
+	   my %nr_snps = ();
+	   foreach my $s (@mapped_snps) {
+		  if ( defined $affy_to_rsid ) {
+			 if ($s !~ m/^rs/){
+				if (exists $affy_id{$s}){ $s = $affy_id{$s};}
+			 }
+		  }
+		  # exclude snps not in the association file nor in the bim file
+		  next unless ( exists $assoc_data{$s} );
+		  next unless ( exists $bim_ids{$s});
+		  $nr_snps{$s} = "";
+	   }
+	   @mapped_snps = keys %nr_snps;
+	   
+	   # go over the snps mapped to the gene and check if they are in the map
+	   # and association files. If so, store the min p-value for the gene.
+	   # if any of the snps is in the files the remove the gene from the analysis.
+	   foreach my $s (@mapped_snps) {
+		  if (defined $v ){ print_OUT("Mapping [ $s ] to [ $ensembl ]",$LOG);}
+		  next if ( grep $_ eq $s, @{ $gene{$ensembl}->{snps} } );
+		  push @{ $snp_to_gene{$s} }, $ensembl;
+		  push @{ $gene{$ensembl}->{snps} }, $s;	
+		  if ( $gene{$ensembl}->{minp} == -9) {
+			 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
+		  } elsif ( $assoc_data{$s}->{pvalue} < $gene{$ensembl}->{minp} ) {
+			 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
+		  }
+	   }
+	   # remove gene if none of its snps is in the analysis.
+	   if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { 
+		   delete( $gene{$ensembl} ); 
+	   } else { 
+		   if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs",$LOG); }
+		   $ids_map{$hugo} = $ensembl;	   
+	   }
+	   
+	}
+	close(MAP);
 }
-close(MAP);
-
-print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes will be analyzed");
-print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed");
+print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes read from SNP-2-Gene Mapping files",$LOG);
+print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed",$LOG);
 
 
 if (scalar keys %gene == 0){
-        print_OUT("No genes mapped");
+        print_OUT("No genes mapped",$LOG);
         exit(1);
 }
+
+if (defined $gmt){
+	my $total_gene_sets=0;
+	print_OUT("Reading gene-set definitions",$LOG);
+	foreach my $gene_set_file (@$gmt){
+		print_OUT("  '-> Reading [ $gene_set_file ]",$LOG);
+		open (GMT,$gene_set_file) or print_OUT("I can not open [ $gene_set_file ] to read from.",$LOG) and die $!;
+		while (my $line = <GMT>){
+			chomp($line);
+			my ( $p_name, $p_desc, @p_genes ) = split( /\t+/, $line );
+			my @gene_with_snp = ();
+			# loop over the genes and check if the ids match with any with SNPs
+			foreach my $gn (@p_genes) {
+				if ( $gn =~ m/\// ) {
+					$gn =~ s/\s+//g;
+					my @genes = split( /\/{1,}/, $gn );
+					map {
+						if ( exists $ids_map{$_} ){
+							push @gene_with_snp, $ids_map{$_};
+						} elsif ( exists $gene{$_} ){
+							push @gene_with_snp, $_;
+						} else {
+							next;
+						}
+					} @genes;
+				} else {
+					if ( exists $ids_map{$gn} ){
+						push @gene_with_snp, $ids_map{$gn};
+					} elsif ( exists $gene{$gn} ){
+						push @gene_with_snp, $gn;
+					} else {
+						next;
+					}
+				}
+			}
+			my %tmp = ();
+			map { $tmp{$_} = ""; } @gene_with_snp;
+			@gene_with_snp = keys %tmp; 
+						
+			next if (scalar @gene_with_snp < $gmt_min_size);
+			next if (scalar @gene_with_snp > $gmt_max_size);
+			
+			%tmp = ();
+			my ($chrs,$starts,$ends) = "";
+			
+			foreach my $g (@gene_with_snp) { 
+				$chrs .= "$gene{$g}->{chr},";
+				$starts .= "$gene{$g}->{start},";
+				$ends .= "$gene{$g}->{end},";
+				foreach my $s (@{ $gene{$g}->{snps} }){
+					$tmp{$s} = "";				
+				}
+			}
+			my @p_snps = keys %tmp;
+			next if (scalar @p_snps < 2);
+			
+			map { push  @{ $snp_to_gene{ $_ } }, $p_name; } @p_snps;
+			
+			$gene{$p_name} = {
+				'chr'       => $chrs,
+				'start'     => $starts,
+				'end'       => $ends,
+				'gene_type' => 'gene_set',
+				'snps'      => [@p_snps],
+				'minp'      => -9,
+				'genotypes' => null,
+				'geno_mat_rows' => [],
+				'cor' => null,
+				'weights' => null,
+				'pvalues' => [],
+				'effect_size' => undef,
+				'effect_size_se' => undef,
+				'gene_status' => 'KNOWN',
+				'ensembl' => $p_name,
+				'hugo' => $p_desc,
+				'desc' => $p_desc,
+				'name' => $p_name,
+				'genes' => [@gene_with_snp],
+			};
+			$total_gene_sets++;
+		}
+	}
+
+	print_OUT("  '-> Just read [ $total_gene_sets ] gene-sets with mapped genes with size [ $gmt_min_size ] and [ $gmt_max_size ]",$LOG);
+}
+
+
+if (defined $exclude_gene_type or defined $include_gene_type){
+	print_OUT("Going to filter genes based on user defined options",$LOG);
+	if (defined $exclude_gene_type){
+		print_OUT("   '-> Will exclude gene-types [ @$exclude_gene_type ]",$LOG);
+	}
+	if (defined $include_gene_type){
+		print_OUT("   '-> Will include gene-types [ @$include_gene_type ]",$LOG);
+	}
+	foreach my $gn (keys %gene){
+		# apply filter by gene type
+		if (defined $exclude_gene_type){
+			delete ($gene{$gn}) if ( grep $_ eq $gene{$gn}->{gene_type} , @$exclude_gene_type );
+		}
+		if (defined $include_gene_type){
+			if (exists $gene{$gn}) {
+				delete ($gene{$gn}) if (not grep $_ eq $gene{$gn}->{gene_type}, @$include_gene_type );
+			}
+		}
+	}
+}
+
+print_OUT("Will analyse [ " . scalar (keys %gene) . " ] genes",$LOG);
+
 
 # start a hash to store the SNP-to-SNP correlation values
 my %correlation = ();
 
 # if provided get the SNP-to-SNP correlation values from a tab separated file with 3 cols:snp1 snp2 correlatio_value
 if (defined $spearman){
-   print_OUT("Reading SNP correlation from [ $spearman ]");
-   open( SPRMN, $spearman ) or print_OUT("I cannot open [ $spearman ]") and exit(1);
+   print_OUT("Reading SNP correlation from [ $spearman ]",$LOG);
+   open( SPRMN, $spearman ) or print_OUT("I cannot open [ $spearman ]",$LOG) and exit(1);
    while (my $ln = <SPRMN>){
       chomp($ln);
       my @a = split(/\s+/,$ln);
@@ -348,33 +584,12 @@ if (defined $spearman){
    }
 }
 # start output file and print its header
-print_OUT("Output file will be written to [ $out ]");
-
-# if printing sample level scores.
-my $out_fh_sample_score_mat = new IO::File if (defined $sample_score);
-my $out_fh_sample_score_dat = new IO::File if (defined $sample_score);
-
-if (defined $sample_score){
-  print_OUT("   '-> Sample Scores: Gene scores printed to [ $out.sample_score.mat ]");
-  $out_fh_sample_score_mat->open(">$out.sample_score.mat");
-  print_OUT("   '-> Sample Scores: Samples data printed to [ $out.sample_score.dat ]");
-  $out_fh_sample_score_dat->open(">$out.sample_score.dat");
-  print $out_fh_sample_score_dat "IID FID PID MID SEX TRAIT\n";
-  for (my $i = 0; $i < scalar @fam; $i++){
-    print $out_fh_sample_score_dat  $fam[$i]->{iid}," ",
-                                    $fam[$i]->{fid}," ",
-                                    $fam[$i]->{pid}," ",
-                                    $fam[$i]->{mid}," ",
-                                    $fam[$i]->{sex}," ",
-                                    $fam[$i]->{pheno},"\n";
-  }
-  $out_fh_sample_score_dat->close();
-}
+print_OUT("Output file will be written to [ $out ]",$LOG);
 
 # create a variable that will store a ref to a hash with the weights
 my $weights = {};
 if (defined @weights_file){
-    print_OUT("Starting to read SNP weigths");
+    print_OUT("Starting to read SNP weigths",$LOG);
     # create hash refs to store the name of the weight categories
     my $w_classes = {};
     my $w_counter = 0; # category counter, in case the file has not a header.
@@ -382,7 +597,7 @@ if (defined @weights_file){
     foreach my $w_f (@weights_file){
         ($weights,$w_counter,$w_classes) = read_weight_file($w_f,$w_counter,$w_classes,$weights, $w_header,\%snp_to_gene);
     }
-    print_OUT("  '-> [ " . scalar (keys %{$weights}) . " ] weights read");
+    print_OUT("  '-> [ " . scalar (keys %{$weights}) . " ] weights read",$LOG);
     # make a single weight vector for each snp
     foreach my $snp (keys %{$weights}){
         # get the snp weights sorted by category name
@@ -394,27 +609,29 @@ if (defined @weights_file){
 
 #start count to report advance 
 my $count = 0;
-print_OUT("Starting to Calculate gene p-values");
+print_OUT("Starting to Calculate gene p-values",$LOG);
 
 # if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 unless (scalar keys %gene < 100){
   $report = int((scalar keys %gene)/100 + 0.5)*10;
 }
-# if user defined a genotypes file. read genotypes and store a genotype matrix (rows: samples, cols: genotypes)for each gene 
+
+my %snp_genotype_stack = ();
+
 if (defined $bfile) {
-  print_OUT("Reading genotypes from [ $bfile.bed ]");
+  print_OUT("Reading genotypes from [ $bfile.bed ]",$LOG);
   # open genotype file
   my $bed = new IO::File;
-  $bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]") and exit(1);
+  $bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]",$LOG) and exit(1);
   binmode($bed); # set file type to binary
   # check if the file is a PLINK file in the proper format by checking the first 3 bytes
   my ($buffer,$n_bytes); 
   my $plink_bfile_signature = "";
   read $bed, $plink_bfile_signature, 3;
   if (unpack("B24",$plink_bfile_signature) ne '011011000001101100000001'){
-    print_OUT("Binary file is not in SNP-major format, please check you files\n");
+    print_OUT("Binary file is not in SNP-major format, please check you files\n",$LOG);
     exit(1);
-  } else { print_OUT("Binary file is on SNP-major format"); }
+  } else { print_OUT("Binary file is on SNP-major format",$LOG); }
   # calculate how many bytes are needed  to encode a SNP
   # each byte has 8 bits with information for 4 genotypes
   my $N_bytes_to_encode_snp = (scalar @fam)/4; # four genotypes per byte
@@ -422,45 +639,132 @@ if (defined $bfile) {
   if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
   # loop over all genes and extract the genotypes of the SNPs
   foreach my $gn (keys %gene){
+	  
     # this will store the genotypes
     my $matrix;
     # loop over the snps mapped to the gene
     foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
-      # skip if it does not have association information
-      next if (not exists $assoc_data{ $bim[$bim_ids{$mapped_snp}]->{snp_id} } );
+		# skip if it does not have association information
+		next if (not exists $assoc_data{ $bim[$bim_ids{$mapped_snp}]->{snp_id} } );
       
-      if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn"); }
-      # because we know the index of the SNP in the genotype file we know on which byte its information starts
-      my $snp_byte_start = $N_bytes_to_encode_snp*$bim_ids{$mapped_snp};
-      # here i extract the actual genotypes
-      my @snp_genotypes = @{ extract_binary_genotypes(scalar @fam,$N_bytes_to_encode_snp,$snp_byte_start,$bed) };
-      # store the genotypes.
-      # if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
-      # here i extract the number of genotypes corresponding to the number of samples
-      push @{ $matrix}, [@snp_genotypes[0..scalar @fam - 1]];
-      # add snp id to matrix row names
-      push @{ $gene{$gn}->{geno_mat_rows} }, $bim[ $bim_ids{$mapped_snp} ]->{snp_id};
-      # store the p-value of the snp
-      push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{pvalue}; 
+		if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn",$LOG); }
+		if (exists $snp_genotype_stack{$mapped_snp}) {
+		if (defined $v){
+				print_OUT("   '-> SNP [ $mapped_snp] already read",$LOG);
+			}
+			push @{ $matrix }, $snp_genotype_stack{$mapped_snp};
+		} else { 
+			# because we know the index of the SNP in the genotype file we know on which byte its information starts
+			my $snp_byte_start = $N_bytes_to_encode_snp*$bim_ids{$mapped_snp};
+			# here i extract the actual genotypes
+			my @snp_genotypes = @{ extract_binary_genotypes(scalar @fam,$N_bytes_to_encode_snp,$snp_byte_start,$bed) };
+			# store the genotypes.
+			# if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
+			# here i extract the number of genotypes corresponding to the number of samples
+			
+			my $maf = get_maf([@snp_genotypes[0..scalar @fam - 1]] ); # check the maf of the SNP
+			next if ($maf == 0 or $maf ==1);  # go to next if it is monomorphic
+			push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
+			$snp_genotype_stack{$mapped_snp} = [@snp_genotypes[0..scalar @fam - 1]];			
+		}
+		
+		# add snp id to matrix row names
+		push @{ $gene{$gn}->{geno_mat_rows} }, $mapped_snp;
+		# store the p-value of the snp
+		push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $mapped_snp }->{pvalue}; 
+		my $effect_measure = $assoc_data{ $mapped_snp }->{effect_size_measure};
+		if (defined $effect_measure){
+			if ($effect_measure eq 'or'){
+				push @{ $gene{$gn}->{effect_size} }, log $assoc_data{ $mapped_snp }->{$effect_measure};
+			} else {
+				push @{ $gene{$gn}->{effect_size} }, $assoc_data{ $mapped_snp }->{$effect_measure};
+			}
+			if (defined $assoc_data{ $mapped_snp }->{se}){
+				if ($effect_measure eq 'or'){
+					#push @{ $gene{$gn}->{effect_size_se} }, abs log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se};
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
+				} else {
+					push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
+				}
+			}
+		}
     }
     # generate the genotype matrix as a PDL piddle
     $gene{$gn}->{genotypes} = pdl $matrix;
-    # Calculate the weights for the gene
-    if (defined @weights_file){
-        $gene{$gn}->{weights} = generate_weights_for_a_gene($gene{$gn}->{geno_mat_rows},$weights);
-    } else {
-        my $n_snps = scalar @{$gene{$gn}->{geno_mat_rows}};
-        $gene{$gn}->{weights} = ones $n_snps;
-        $gene{$gn}->{weights} *= 1/$n_snps;
-        $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
-    }
-    # calculate gene p-values
-    &gene_pvalue($gn);
+	  
+	# Calculate the genotypes correlation matrix
+	my $more_corrs = "";
+	($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation);
+	%correlation = (%correlation,%{$more_corrs});
+	  
+	# Calculate the weights for the gene
+	$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
+	# calculate gene p-values
+	my $z_based_p = z_based_gene_pvalues($gene{$gn});
+	if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
+		$z_based_p = {
+			'B_stouffer_fix' => "NA",
+			'B_stouffer_random' => "NA",
+			'B_fix' => "NA",
+			'B_random' => "NA",
+			'V_fix' => "NA",
+			'V_random' => "NA",
+			'Chi_fix' => "NA",
+			'Chi_random' => "NA",
+			'Z_fix' => "NA",
+			'Z_random' => "NA",
+			'Z_P_fix' => "NA",
+			'Z_P_random' => "NA",
+			'Q' => "NA",
+			'Q_P' => "NA",
+			'I2' => "NA",
+			'tau_squared' => "NA",
+			'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
+		};
+	} else {
+		$z_based_p->{'Z_P_fix'} = gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_fix'});
+		$z_based_p->{'Z_P_random'} = gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_random'});
+		$z_based_p->{'Q_P'} = 1- gsl_cdf_chisq_P($z_based_p->{'Q'},$z_based_p->{'N'}-1);
+	
+	}
+	my $pvalue_based_p = gene_pvalue($gn) if (not defined $no_forge);
+
+	print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+		$gene{$gn}->{pvalues}->min,
+		$pvalue_based_p->{sidak_min_p},
+		$pvalue_based_p->{fisher},
+		$pvalue_based_p->{fisher_chi},
+		$pvalue_based_p->{fisher_df},
+		$z_based_p->{'Z_fix'},
+		$z_based_p->{'Z_P_fix'},
+		$z_based_p->{'Z_random'},
+		$z_based_p->{'Z_P_random'},
+		$z_based_p->{'I2'},
+		$z_based_p->{'Q'},
+		$z_based_p->{'Q_P'},
+		$z_based_p->{'tau_squared'},
+		$pvalue_based_p->{Meff_Galwey},
+		$pvalue_based_p->{Meff_gao},
+		scalar @{ $gene{$gn}->{geno_mat_rows} });
+	print $OUT "\n";
+	# remove LD measures and genotypes from the stack that will not use again to free memory
+	foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
+	  if (scalar @{ $snp_to_gene{ $snp } } == 1){
+		  foreach my $pair ( keys %{$correlation{$snp}}){
+			  delete($correlation{$snp}{$pair});
+			  delete($correlation{$pair}{$snp});
+		  }
+		  delete($snp_genotype_stack{ $snp });
+		  delete($snp_to_gene{ $snp });
+	  } else {
+		  splice(@{ $snp_to_gene{ $snp } },0,1);
+	  }
+	}
     # delete the gene's data to keep memory usage low
     delete($gene{$gn});
     $count++;
     &report_advance($count,$report,"Genes");	
- }
+  }
 } elsif (defined $ped and defined $map){
   my $genotypes = pdl @{ $ped_map_genotypes };
   foreach (my $index_snp = 0; $index_snp <  scalar @bim; $index_snp++){
@@ -468,7 +772,7 @@ if (defined $bfile) {
     if (exists $assoc_data{ ${ $bim[$index_snp] }{snp_id} } ){
       # for every gene mapped to this SNP, push inside the genotype matrix this SNP genotypes.
       foreach my $gn (@{ $snp_to_gene{${ $bim[$index_snp] }{snp_id} } }){
-	if (defined $v){ print_OUT("Adding SNP [  ${ $bim[$index_snp] }{snp_id}  ] to genotypes of $gn"); }
+	if (defined $v){ print_OUT("Adding SNP [  ${ $bim[$index_snp] }{snp_id}  ] to genotypes of $gn",$LOG); }
 	next if ( grep $_ eq ${ $bim[$index_snp] }{snp_id} , @{ $gene{$gn}->{geno_mat_rows} } );
 	# add the genotypes to the genotype matrix
 	$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->glue(1,$genotypes(,$index_snp));
@@ -483,8 +787,16 @@ if (defined $bfile) {
             $gene{$gn}->{weights} *= 1/$n_snps;
             $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
         }
-	  &gene_pvalue($gn);
-	  delete($gene{$gn});
+		if (defined $geno_probs){
+			my @lines = map { $bim_ids{$_} + 1 } @{$gene{$gn}->{geno_mat_rows}}; 
+			my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($gene{$gn}->{geno_mat_rows},\@lines,$g_prob_threshold,$geno_probs_format,$gprobs,$gprobs_index);
+			$gene{$gn}->{genotypes} *=$p_mat;
+		}
+		$gene{$gn}->{cor} = corr_table($gene{$gn}->{genotypes});
+			
+	  &gene_pvalue($gn) if (not defined $no_forge);
+
+			delete($gene{$gn});
 	  $count++;# if there are more than 100 genes change the $report variable in order to report every ~ 10 % of genes.
 	  unless (scalar keys %gene < 100){
 	    my $report = int((scalar keys %gene)/100 + 0.5)*10;
@@ -494,14 +806,16 @@ if (defined $bfile) {
       }
     }
   }
+
 }else {
-  print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness");
+  print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness",$LOG);
 }
- 
-$out_fh_sample_score_mat->close() if (defined $sample_score);
+
+
+
 # if the user want to get the correlation values print the *.correlation file
 if (defined $print_cor){
-  open (COR,">$out.correlation") or print_OUT("Cannot open [ $out.correlation ] to write to") and exit(1);
+  open (COR,">$out.correlation") or print_OUT("Cannot open [ $out.correlation ] to write to",$LOG) and exit(1);
   foreach my $snp1 (keys %correlation) {
     foreach my $snp2 (keys %{$correlation{$snp1}}  ) {
       next if ($snp1 eq $snp2);
@@ -511,8 +825,90 @@ if (defined $print_cor){
   }
   close(COR);
 }
-print_OUT("Well Done!!");
+
+print_OUT("Well Done!!",$LOG);
+
+$LOG->close();
+$OUT->close();
+
 exit(0);
+
+sub deal_with_weights {
+	my $w_files = shift;
+	my $gn = shift;
+	my $w_by_maf =shift;
+	my $weights = shift;
+	my $back = null;
+	my $N = scalar @{ $gn->{geno_mat_rows} };
+	if (defined @$w_files){
+        $back = generate_weights_for_a_gene($gn->{geno_mat_rows},$weights);
+    } else {
+        $back = ones $N;
+        $back *= 1/$N;
+        $back /= $back->dsum;
+    }
+	
+	# if desired weigth by the 1/MAF
+	if (defined $w_by_maf){
+		my $MAF_w = get_maf_weights($gn->{genotypes});
+		$back *= $MAF_w->transpose;
+	}
+	
+	# Correct the weights by the LD in the gene.
+	# the new weight will be the weigthed mean of the gene.
+	# the new weight will be the weigthed mean of the gene weights.
+	# the weights for the mean are the correlation between the SNP, In that way the
+	# weights reflect the correlation pattern of the SNPs 
+	# weights reflect the correlation pattern of the SNPs
+	my $w_matrix = $back * abs($gn->{cor_ld_r}); # multiply the weights by the correaltions
+	my @dims = $w_matrix->dims();
+	$w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$back->dsum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
+	if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
+	$w_matrix /= $w_matrix->sum; # make sure weights sum 1
+	
+	$back = $w_matrix/$w_matrix->sum;
+	return($back);
+	
+}
+	
+
+sub deal_with_correlations {
+	my $gn = shift;
+	my $correlation = shift;
+	my %new_corrs = ();
+	my $pearson_cor = corr_table($gn->{genotypes});
+	my $n = scalar @{ $gn->{'geno_mat_rows'} };
+	my $cor_ld_r = zeroes $n,$n; 
+	$cor_ld_r->diagonal(0,1) .= 1;
+	for (my $i = 0; $i < $n; $i++){
+		for (my $j = $i; $j < $n; $j++){
+			next if ($j == $i);
+			if (exists $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]}){
+				set $cor_ld_r, $i, $j, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+				set $cor_ld_r, $j, $i, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+			} else {
+				my $ld = calculate_LD_stats([ $gn->{'genotypes'}->(,$i)->list ],[ $gn->{'genotypes'}->(,$j)->list ]);	
+				set $cor_ld_r, $i, $j, $ld->{r};
+				set $cor_ld_r, $j, $i, $ld->{r};
+				
+				$new_corrs{ $gn->{'geno_mat_rows'}->[$i] }{ $gn->{'geno_mat_rows'}->[$j] } = $ld->{r};
+				$new_corrs{ $gn->{'geno_mat_rows'}->[$j] }{ $gn->{'geno_mat_rows'}->[$i] } = $ld->{r};
+			}
+		}
+	}
+	return($pearson_cor,$cor_ld_r,\%new_corrs);
+}
+
+
+sub get_maf_weights {
+	my $genotypes = shift;
+	my $MAF_w = $genotypes->sumover/(2*$genotypes->getdim(0));
+	my $maf_to_flip = which($MAF_w >0.5);
+	$MAF_w->index($maf_to_flip) .= 1 - $MAF_w->index($maf_to_flip);
+	$MAF_w /= $MAF_w->sum;
+	$MAF_w = $MAF_w->flat; 
+	return($MAF_w);
+}
 
 sub generate_weights_for_a_gene {
     my $snps = shift;
@@ -549,6 +945,17 @@ sub generate_weights_for_a_gene {
     return($W);
 }
 
+sub make_file_name_array {
+	my $file = shift;
+	my @back = ();
+	my @body = split(/\#/,$file);
+	for my $chr (1..26){
+		push @back, join "$chr", @body;
+	}
+	return([@back]);
+}
+
+
 # usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
 sub build_index {
     my $data_file  = shift;
@@ -579,264 +986,70 @@ sub line_with_index {
     seek($index_file, $i_offset, 0) or return;
     read($index_file, $entry, $size);
     $d_offset = unpack("N", $entry);
-    seek($data_file, $d_offset, 0);
-    return scalar(<$data_file>);
-}
-
-sub extract_binary_genotypes {
-  my $n_genotypes = shift; # number of genotypes per SNP
-  my $bytes_per_snp = shift; # number of bytes needed to code the SNP
-  my $byte_position = shift; # starting byte position for this SNP
-  my $FH = shift; # file handle for the genotype file
-  $FH->seek(3 + $byte_position,SEEK_SET); # re-set the file-handle to position start position of the SNP of interest
-  my $buffer = ""; # this will store the information read
-  my $n_bytes = read $FH, $buffer, $bytes_per_snp; # read the genotypes
-  my $data_size = $bytes_per_snp*8; # the amount of data to extract is 8 bits per byte
-  my $bin_data = unpack("B$data_size",$buffer); 
-  my @bits = ( $bin_data =~ m/\d{8}/g );
-  my @genotypes = ();
-  foreach my $b (@bits){
-    $b = reverse($b); # for some odd reason PLINK stores the genotypes in reverse order
-    push @genotypes, @{ get_genotypes($b)};# transform each byte on genotypes
-  }
-  return(\@genotypes);
-}
-
-sub get_genotypes {
-  my $b = shift; # a byte
-  my @back = ();
-  my @genotypes = ( $b =~ m/\d{2}/g ); # extract a pair of number = a genotype
-  foreach my $geno (@genotypes){
-    # 10 indicates missing genotype, otherwise 0 and 1 point to allele 1 or allele 2 in the BIM file, respectively
-    if    ( $geno eq '00' ) {  # homozygous 1/1
-      push @back, '1';
-    } elsif ( $geno eq '11' ) { # -- other homozygous 2/2
-      push @back, '3';
-    } elsif ( $geno eq '01' ) { # -- heterozygous 1/2
-      push @back, '2';
-    } elsif ( $geno eq '10' ) { # -- missing genotype 0/0
-      push @back, '0';
-    } else { print_OUT("This genotype is not recognize [ $geno ]"); }    # genotype not recognize
-
-  }
-  return(\@back);
+	if (not defined $d_offset){
+		return('1');
+	} else {
+		seek($data_file, $d_offset, 0);
+		return scalar(<$data_file>);
+	}
 }
 
 sub gene_pvalue {
     my $gn = shift;
-    if (defined $v){ print_OUT("____ $gn ____"); }
-    if (not defined $bfile){ @{ $gene{$gn}->{geno_mat_rows}} = @{ $gene{$gn}->{snps}}; }
+    if (defined $v){ print_OUT("____ $gn ____",$LOG); }
     my $n_snps = scalar @{ $gene{$gn}->{geno_mat_rows}};
-    next if ($n_snps == 0);
     # if the gene has just 1 SNP we make that SNP's p value the gene p-value under all methods
-	if ($n_snps == 1){
-            if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
-            printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\tNA\tNA\t1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp});
-            delete($gene{$gn});
-            return();
-        }
-    #if the user defined a genotype file then we need to get the number of SNPs in the gene.
-    # if the user did not defined neither a genotype nor a file with the SNP-SNP correlations exit the program
-    unless (defined $bfile or defined $spearman or defined $ped) {
-        print_OUT("You MUST specify file with the SNP-SNP correlations or a genotype file to calculate them by myself\n\n");
-        exit(1);
-    }
-   
-   if (defined $v){ print_OUT("Calculating correlation matrix for $n_snps SNPs with association data"); }
-   # initialize correlation matrix with zeroes
-   my $cor = zeroes $n_snps,$n_snps;
-   # set equal weight to all SNPs
-   # initialize the second term for the variance of the statistics  for the Makambi method
-   # loop over all pairs of SNPs and get their correlation values
-   for ( my $i = 0; $i < $n_snps; $i++){
-      for ( my $p = $i; $p < $n_snps; $p++){
-	 # if the correlation is known
-	 if (defined $v){ print_OUT("working in $i:$gene{$gn}->{geno_mat_rows}->[$i]; $p:$gene{$gn}->{geno_mat_rows}->[$p]"); }
-	  # if is it a self correlation then don't calculate anything
-	 if ($gene{$gn}->{geno_mat_rows}->[$p] eq  $gene{$gn}->{geno_mat_rows}->[$i]){
-	    set $cor, $i, $p, 1;
-            set $cor, $p, $i, 1;
-	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = 1;
-	    $correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = 1;
-	    next;
-	 }
-	 # if the correlation is stored in the %correlation hash then fetch the value
-	 if (exists $correlation{ $gene{$gn}->{geno_mat_rows}->[$p] }{ $gene{$gn}->{geno_mat_rows}->[$i] } ){
-	    	my $c = $correlation{ $gene{$gn}->{geno_mat_rows}->[$p] }{ $gene{$gn}->{geno_mat_rows}->[$i] };
-	    	set $cor, $i, $p, $c;
-		set $cor, $p, $i, $c;
-      	} else { 
-		# if the user did not provided a genotype file and tell that this pair of SNPs does not have a correlation value
-		unless ((defined $bfile) or (defined $ped)){print_OUT(" WARNING: this pair of snps does not have a correlation value: [$gn => $gene{$gn}->{snps}->[$p] ] and [ $gene{$gn}->{snps}->[$i] ]"); }
-		# compute the correlation
-		#my $c = "";
-		#if (defined $pearson_genotypes) { # if requested used the Pearson correlation for genotypes
-		#  $c = pearson_corr_genotypes([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		#} else { # by default use the spearman rank correlation
-		  #my $d = Statistics::RankCorrelation->new([list $gene{$gn}->{genotypes}->(,$i)],[list $gene{$gn}->{genotypes}->(,$p)]);
-		  #$c = $d->spearman;
-                  my $a = $gene{$gn}->{genotypes}->(,$i)->flat->copy;
-                  $a->inplace->setvaltobad( 0 );
-                  my $b = $gene{$gn}->{genotypes}->(,$p)->flat->copy;
-                  $b->inplace->setvaltobad( 0 );
-                  my ($c) = $a->corr($b)->list;
- 		#}
- 		set $cor, $i,$p, $c;
-		set $cor, $p,$i, $c;
-		# increase the second term of the Makambi method
-		# store the correlation value in case is needed later.
-		$correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$i] }{${ $gene{$gn}->{geno_mat_rows} }[$p]} = $c;
-		$correlation{ ${ $gene{$gn}->{geno_mat_rows} }[$p] }{${ $gene{$gn}->{geno_mat_rows} }[$i]} = $c;
-      }
-    }
-  }
-   if (defined $v){ print_OUT($cor);}
-   if (defined $v){ print_OUT("Calculating effective number of tests: "); }
+	if ($n_snps < 2){
+		if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\tNA\tNA1\t1\n",$gene{$gn}->{minp},$gene{$gn}->{minp},$gene{$gn}->{minp}); }
+		return({
+			'fisher' => -1,
+			'fisher_df' => -1,
+			'fisher_chi' => -1,
+			'sidak_min_p' => -1,
+			'Meff_gao' => -1,
+			'Meff_Galwey' => -1,
+		});
+	}
+
+   if (defined $v){ print_OUT("Calculating effective number of tests: ",$LOG); }
    # calculate number of effective tests by the Gao ($k) and Galwey ($Meff_galwey) method.	  
-   my ($k,$Meff_galwey) = number_effective_tests(\$cor);
+   my ($k,$Meff_galwey) = number_effective_tests(\$gene{$gn}->{cor});
 
    # get the log of the SNP p-value
-   $gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
+	if (ref($gene{$gn}->{pvalues}) eq "ARRAY"){
+		$gene{$gn}->{pvalues} = pdl @{ $gene{$gn}->{pvalues} };
+	}
    # calculate the chi-square statistics for the Makambi method and its p-value
-    if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]"); }
-    # Correct the weights by the LD in the gene.
-    # the new weight will be the weigthed mean of the gene.
-    # the weights for the mean are the correlation between the SNP, In that way the
-    # weights reflect the correlation pattern of the SNPs 
-    my $w_matrix = $gene{$gn}->{weights}*abs($cor); # multiply the weights by the correaltions
-    my @dims = $w_matrix->dims();
-    $w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$gene{$gn}->{weights}->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
-    if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
-    $w_matrix /= $w_matrix->sum; # make sure weights sum 1
-    $gene{$gn}->{weights} = $w_matrix/$w_matrix->sum;
-   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($cor,$gene{$gn}->{weights},$gene{$gn}->{pvalues});
 
-   my $fisher_p_value =  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
+    #
+    #### WORK ON THE GENE WEIGHTS ####
+    #
+
+    if (defined $v){ print_OUT("Weigth = [ $gene{$gn}->{weights} ]",$LOG); }
+
+
+   my ($forge_chi_stat,$forge_df) = get_makambi_chi_square_and_df($gene{$gn}->{cor},$gene{$gn}->{weights},$gene{$gn}->{pvalues});
+   my $fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($forge_chi_stat, $forge_df );
    
+	
+	my $sidak = sclr double 1-(1- $gene{$gn}->{pvalues}->min)**$k;
+	$forge_df = sclr $forge_df;
+	$forge_chi_stat = sclr $forge_chi_stat;
+	my $back = {
+		'fisher' => $fisher_p_value,
+		'fisher_df' => $forge_df,
+		'fisher_chi' => $forge_chi_stat,
+		'sidak_min_p' => $sidak,
+		'Meff_gao' => $k,
+		'Meff_Galwey' => $Meff_galwey,
+	};
    # print out the results
-   my $sidak = 1-(1-$gene{$gn}->{minp})**$k;
-   if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
-   printf OUT ("$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t$n_snps\t$k\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$n_snps,$k);
-  # finally if requested calculate the gene-score for all samples
-  &sample_score($gene{$gn},\%assoc_data,$cor, \%bim_ids, $gprobs, $gprobs_index) if (defined $sample_score);
-}
-
-# this subroutine calcultes a gene-score for each sample
-# inputs are the gene pseudo-hash, the association p-values and the correlation matrix
-sub sample_score {
-  my $gene = shift; # pseudohash with gene information
-  my $assoc = shift; # ref to a hash
-  my $cor_matrix = shift; # pdl matrix object
-  my $snp_index = shift; # index of SNP in genptype file
-  my $geno_probs = shift; # file handel for file with genotype probabilities.
-  my $geno_probs_index = shift; # file handel for file with index of genotype probabilities.
-    # get snps info
-    my @snp_info = map { $assoc->{$_}; } @{ $gene->{geno_mat_rows} } ;
-    # counter to index the snps
-    my $snp_counter = 0;
-    # array to store the genotype probs of each sample
-    # each element in the array will a ref to an array which contains the prob for each snp for this sample
-    # WARNING: not very momery efficient.
-    my @sample_geno_prob = ();
-    # go over each snps
-    if (defined $geno_probs){
-        foreach my $snp (@snp_info){
-            # use the index in teh bim or map file to find the line in the genotype prob file
-            # my index starts from 0 but the lines in the file from, 1 so add 1
-            my $desired_line = $snp_index->{$snp->{id}} + 1;
-            # get the line
-            my $line = line_with_index(*$geno_probs, *$geno_probs_index, $desired_line);
-            # split the information in the line
-            my @genos = split(/[\t+\s+]/,$line);
-            # now loop for all sample for this snps
-            my $sample_counter = 0;
-            for (my $g = 5; $g < scalar @genos; $g +=3){
-                # for each sample store the 3 genotype probs 
-                push @{ $sample_geno_prob[$sample_counter] }, [$genos[$g],$genos[$g+1],$genos[$g+2]];
-                $sample_counter++;
-            }
-            if (not defined $line){ print_OUT("Trying to fetch line out of range in sample score analysis. Line [ $desired_line ] was requested.") and exit(1); }
-            $snp_counter++;
-        }
-    }
   
-  # alleles have been coded as 1 : homozygote 1/1, 2 heterozygous, 3: homozygote 2/2 and 0: missing.
-  # risk dosage is calculated by: number of risk alleles * odd-ratio. odd ratio for the risk allele
-  my ($n_samples,$n_snps) = $gene->{genotypes}->dims;
-  my $out_line = "$gene->{ensembl} $gene->{hugo}";
-  for (my $person = 0; $person < $n_samples; $person++){
-    my @genotypes = $gene->{genotypes}->($person,)->list;
-    my @tmp_allele = ();
-    my @tmp_or = ();
-    
-    for (my $g = 0; $g < scalar @genotypes; $g++) {
-        # store counts of minor alleles
-        my $geno = $genotypes[$g];
-        # recover the genotype prob for this SNP on this sample.
-        # the final genotype will be the count of risk alleles multiply by its probability
-        my $g_prob = 1;
-        if (defined $geno_probs) { $g_prob = $sample_geno_prob[$person]->[$g]->[$geno - 1]; }
-        
-        if ($snp_info[$g]->{or} < 1){ # the minor allele is the protective allele
-            push @tmp_or, 1/$snp_info[$g]->{or};
-            if ($geno == 1) { push @tmp_allele, 0*$g_prob; }
-            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
-            if ($geno == 3) { push @tmp_allele, 2*$g_prob; }
-            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
-        } else { # the minor allele is the risk allele
-            push @tmp_or, $snp_info[$g]->{or};
-            if ($geno == 1) { push @tmp_allele, 2*$g_prob; }
-            if ($geno == 2) { push @tmp_allele, 1*$g_prob; }
-            if ($geno == 3) { push @tmp_allele, 0*$g_prob; }
-            if ($geno == 0) { push @tmp_allele, 0*$g_prob; }
-        }
-    }
-    # multiply the risk allele count by the odd ratio for that allele
-    my $sample_w = pdl @tmp_allele;
-    my $sample_or= pdl @tmp_or;
-    $sample_w *= ($sample_or->log + 1);
-    # make sure not weigth is equal to 0
-    $sample_w += $sample_w->(which($sample_w > 0))->min;
-    # make sure they add one
-    $sample_w /= $sample_w->sumover;
-    # multiply by the SNP weigths
-    $sample_w *= $gene->{weights};
-    $sample_w /= $sample_w->sumover;
-    # calculate the FORGE statistics using the sample weights
-    my ($person_chi_stat,$person_df) = get_makambi_chi_square_and_df($cor_matrix,$sample_w,$gene->{pvalues});
-    # get the p-value
-    my $sample_score_p_value = 1 - gsl_cdf_chisq_P( $person_chi_stat, $person_df );
-    $out_line .= " $sample_score_p_value";
-  }
-  ## TODO ##
-  # implement the association between the sample score and the phenotype.
-  # use a regression with the adecuate covariates. the -covariate option must be implemented for this
-  print $out_fh_sample_score_mat "$out_line\n";
+   if (defined $v){ printf (scalar localtime() . "\t$gn\t$gene{$gn}->{hugo}\t$gene{$gn}->{gene_type}\t$gene{$gn}->{chr}\t$gene{$gn}->{start}\t$gene{$gn}->{end}\t%0.3e\t%0.3e\t%0.3e\t%0.5f\t%0.5f\t%0.3e\t%0.5f\t%0.5f\t%2d\t%3d || $gene{$gn}->{weights}\t$gene{$gn}->{pvalues}->log\t@{ $gene{$gn}->{geno_mat_rows} }\n",$gene{$gn}->{minp},$sidak,$fisher_p_value,$forge_chi_stat,$forge_df,$Meff_galwey,$n_snps,$k); }
+	return($back);
 }
 
-# this subroutine applies the makambi method to combine p-values from correlated test
-# the method receives a correlation matrix, a set of weights for each statistic and a set of probabilies to combine.
-# it returns the chi-square and the degrees of freedom of the test
 
-sub get_makambi_chi_square_and_df {
-  my $cor = shift; # a pdl matrix with the varoable correlations
-  my $w = shift; # a pdl vector with the weights;
-  # make sure weiths sum one
-  $w /= $w->sumover;
-  my $pvalues = shift; # a pdl vector with the p-values to be combined
-  # calculate the correlation matrix before the applying the weights
-  # I have change this calculation following the results of the paper of Kost et al. this should improve the approximation of the test statistics
-  # Kost, J. T. & McDermott, M. P. Combining dependent p-values. Statistics & Probability Letters 2002; 60: 183-190.
-  # my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
-  my $COR_MAT = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3)); 
-  my $second = $COR_MAT*$w*($w->transpose); # apply the weights 
-  ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
-  my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics
-  my $df = 8/$varMf_m; # the degrees of freedom of the test statistic
-  my $chi_stat = sumover(-2 * $pvalues->log * $w); # and the chi-square for the combine probability
-  $chi_stat = ( $chi_stat/2 ) * $df;
-  return ($chi_stat,$df);
-}
 
 # this subroutine take an array and return a hash were every element of the line is
 # a key and the value is the index in the array
@@ -849,258 +1062,26 @@ sub get_header {
    return(\%back);
 }
 
-# this subroutine calculate the number of effective test by the Galwey and Gao method.
-sub number_effective_tests {
-   my $mat = shift;
-   # calculate the eigen value of the correlation matrix
-   my $eigens = eigens ${$mat};
-   # normalize the values
-   my $eigens_norm =  pdl sort { $b <=> $a } list ($eigens/(sumover $eigens) );
-   # calculate number of effective test per Gao et al Gao, X., Becker, L. C., Becker, D. M., Starmer, J. D. & Province, M. A. Avoiding the high Bonferroni penalty in genome-wide association studies. Genet. Epidemiol. (2009).
-   # the methos simply count how many eigen values are needed to explain 99.5 % of the variance
-   my $simpleM = 0;
-   for( $simpleM = 0; $simpleM < scalar list $eigens_norm; $simpleM++){
-      my $sum = sumover $eigens_norm->slice("0:$simpleM");
-      if ($sum >= 0.995){
-         $simpleM++;
-         last;
-      }
-   }
-   # calculate number of effective test by Galwey, N. W. A new measure of the effective number of tests, a practical tool for comparing families of non-independent significance tests. Genet. Epidemiol. (2009).
-   # this method calculate the square of sum of the square-root of the eigen values divided by the sum.
-   my $numerator = 0;
-   my $denominator = 0;
-   foreach my $e (list $eigens) {
-	  if ($e > 0){
-			$numerator += sqrt($e);
-			$denominator += $e;
-	  }
-   }
-   my $Meff_galwey = ($numerator**2)/$denominator;
-   if (defined $v){ print_OUT(" simpleM_Gao = $simpleM; Meff_galwey=$Meff_galwey $numerator $denominator"); }
-   return($simpleM,$Meff_galwey);
-}
 
-# this subroutine receives a list of SNPs and return the log of the their p-values
-sub get_logs {
-   my $snps = shift;
-   my @stats = ();
-   if (defined $v) { print_OUT("____ ASSOCIATIONS ____ \n  [ ",scalar @$snps," ] SNPs"); }
-   foreach my $s (@{$snps}){
-      my $p = $assoc_data{$s}->{pvalue};
-      next if ($p eq "NA");
-      if ($p == 0){ push @stats ,1;}
-      else {
-         push @stats ,log($p);
-      }
-      if (defined $v) {  print_OUT("\t$s\t$p"); }
-   }
-   if (defined $v) { print_OUT("______________________"); }
-   return(\@stats);
-}
 
 # this subroutine print the advance of of something
 # it receives 3 parameter: index, rep and tag. index is the advance so far, report how often to report and tag is name for the printing
 # it will print a report when index if divisible by rep
 sub report_advance {
 	  my ($index,$rep,$tag) = @_;
-   if (( $index/$rep - int($index/$rep)) == 0) {print_OUT(" '->Done with [ $index ] $tag"); }
+   if (( $index/$rep - int($index/$rep)) == 0) {print_OUT(" '->Done with [ $index ] $tag",$LOG); }
 }
 
-# this subroutine read the fam file and stores the information in an array
-# the elements of the array are pseudo hashes with all the sample's information
-sub read_fam {
-   my $fam = shift;
-   print_OUT("Reading samples info from [ $fam ]");
-   open( FAM, $fam ) or print_OUT("Cannot open [ $fam ] file") and exit(1);
-   my @back = ();
-   while ( my $s = <FAM> ) {
-      my @data = split( /\s+/, $s );
-      push @back,
-        {
-         'iid'   => $data[0],
-         'fid'   => $data[1],
-         'mid'   => $data[2],
-         'pid'   => $data[3],
-         'sex'   => $data[4],
-         'pheno' => $data[5],
-        };
-   }
-   print_OUT("[ " . scalar @back . " ] samples read");
-   return ( \@back );
-}
-
-# this subroutine read the bim file and store information about the SNPs
-# each element of the array returned is a pseudo hash with the SNP information
-sub read_bim {
-   my $bim = shift;
-   print_OUT("Reading SNPs info from [ $bim ]");
-   open( BIM, $bim ) or print_OUT("Cannot open [ $bim ] file") and exit(1);
-   my @back = ();
-   while ( my $snp = <BIM> ) {
-      chomp($snp);
-      my @data = split( /\t+/, $snp );
-	  # if an affy to rsid mapping was provided change the ids
-      if ( defined $affy_to_rsid ) {
-         if ($data[1] !~ m/^rs/){
-            if (exists $affy_id{$data[1]}){ $data[1] = $affy_id{$data[1]};}
-         }
-      }
-      push @back,
-        {
-         'snp_id' => $data[1],
-         'chr'    => $data[0],
-         'cm'     => $data[2],
-         'pos'    => $data[3],
-         'a2'     => $data[4],
-         'a1'     => $data[5],
-        };
-   }
-   print_OUT("[ " .  scalar @back . " ] SNPs on BED file");
-   return ( \@back );
-}
-
-sub read_map {
-   my $map = shift;
-   print_OUT("Reading SNPs info from [ $map ]");
-   open( MAP, $map ) or print_OUT("Cannot open [ $map ] file") and exit(1);
-   my @back = ();
-   while ( my $snp = <MAP> ) {
-      chomp($snp);
-      my @data = split( /\t+/, $snp );
-	  # if an affy to rsid mapping was provided change the ids
-      if ( defined $affy_to_rsid ) {
-         if ($data[1] !~ m/^rs/){
-            if (exists $affy_id{$data[1]}){ $data[1] = $affy_id{$data[1]};}
-         }
-      }
-      push @back, {
-         'snp_id' => $data[1],
-         'chr'    => $data[0],
-         'cm'     => $data[2],
-         'pos'    => $data[3],
-         'a2'     => 0,
-         'a1'     => 0,
-        };
-   }
-   print_OUT("  '->[ " . scalar @back . " ] SNPs on PED file");
-   return ( \@back );
-}
-
-sub read_map_and_ped {
-	my $file = shift;
-	my $map = shift;
-	my @bim = @{ read_map($map) };
-	print_OUT("Reading Genotypes from [ $file ]");
-	open(PED,$file) or print_OUT("Cannot open [ $file ] file") or exit(1);
-	my @back_fam = ();
-	my @geno_matrix= ();
-	while (my $sample = <PED>){
-		chomp($sample);
-		my ($iid,$fid,$mid,$pid,$sex,$pheno,@genotypes) = split(/\s+/,$sample);
-		my $snp_counter = 0;
-		for (my $g = 0; $g < scalar @genotypes; $g+=2){
-			$geno_matrix[$snp_counter]->{alleles}->{$genotypes[$g]}++;
-			$geno_matrix[$snp_counter]->{alleles}->{$genotypes[$g+1]}++;
-			push @{ $geno_matrix[$snp_counter]->{genotypes} }, "$genotypes[$g]$genotypes[$g+1]";
-			$snp_counter++; 
-		}
-		push @back_fam,{
-			'iid'   => $iid,
-			'fid'   => $fid,
-			'mid'   => $mid,
-			'pid'   => $pid,
-			'sex'   => $sex,
-			'pheno' => $pheno,
-			};
-	}
-	my @back_genotypes = ();
-	my $snp_counter = 0;
-	foreach my $snp (@geno_matrix){
-		my @alleles = sort { $snp->{alleles}->{$b} <=> $snp->{alleles}->{$a} } keys %{ $snp->{alleles} };
-		($snp->{alleles}->{major},$snp->{alleles}->{minor},$snp->{alleles}->{missing}) = 0;
-		for (my $i = 0; $i < scalar @alleles; $i++) {
-			if ($alleles[$i] == 0) { 
-				$snp->{alleles}->{missing} =$alleles[$i]; 
-			} else {
-				if ( $snp->{alleles}->{major} == 0){
-					$snp->{alleles}->{major}= $alleles[$i];
-				} else {
-					$snp->{alleles}->{minor}= $alleles[$i];
-				}
-			} 
-			
-		}
-		
-		$bim[$snp_counter]->{a1} = $snp->{alleles}->{minor};
-		$bim[$snp_counter]->{a2} = $snp->{alleles}->{major};
-		foreach my $g (@{ $snp->{genotypes} }){
-			my $major_homo = "$snp->{alleles}->{major}$snp->{alleles}->{major}";
-			my $minor_homo = "$snp->{alleles}->{minor}$snp->{alleles}->{minor}";
-			my $hetero1 = "$snp->{alleles}->{major}$snp->{alleles}->{minor}";
-			my $hetero2 = "$snp->{alleles}->{minor}$snp->{alleles}->{major}";
-			my $missing = "$snp->{alleles}->{missing}$snp->{alleles}->{missing}";
-			my $recoded = 0;
-			# homozygous major allele
-			if ($g == $major_homo) {
-				$recoded = 3;
-			} elsif ($g == $minor_homo){ # homozygous minor allele
-				$recoded = 1;
-			} elsif (($g == $hetero1) or ($g == $hetero2)){ # heterozygous
-				$recoded = 2
-			} elsif ($g == $missing) { # missing
-				$recoded = 0;
-			} else { print_OUT(" COULD NOT RECOGNIZE THIS GENOTYPE >$g<\n" . Dumper($snp->{alleles}) . "");
-				exit(1);
-			}
-			push @{$back_genotypes[$snp_counter]}, $recoded;
-		}
-		$snp_counter++;
-	}
-	print_OUT("  '-> [ " . scalar @back_fam . " ] samples");
-	print_OUT("  '-> [ " . scalar @back_genotypes . " ] SNPs");
-	return(\@back_fam, \@back_genotypes,\@bim);
-}
-
-
-sub pearson_corr_genotypes {
-  # implemented as in S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
-  # genotypes must be coded as 1,2 and 3,any other coding will be use. missing genotypes can be set to anything different of 1, 2 or 3.
-  # this method will fail is more than 2 out of the four homozygoues haplotypes have counts 0. In such case i recommend to use the default option of the spearman correlation. 
-  my $snp1 = shift;
-  my $snp2 = shift;
-  # initialize to 0 all values for the haplotype cells
-  my @cells = (0,0,0,0,0,0,0,0,0);
-  # count how many observation of every haplotype are
-  for (my $i = 0; $i < scalar @$snp1; $i++){
-   $cells[8]++ if ((${$snp1}[$i] == 1) and (${$snp2}[$i] == 1));	
-   $cells[7]++ if ((${$snp1}[$i] == 2) and (${$snp2}[$i] == 1));	
-   $cells[6]++ if ((${$snp1}[$i] == 3) and (${$snp2}[$i] == 1));	
-   $cells[5]++ if ((${$snp1}[$i] == 1) and (${$snp2}[$i] == 2));	
-   $cells[4]++ if ((${$snp1}[$i] == 2) and (${$snp2}[$i] == 2));	
-   $cells[3]++ if ((${$snp1}[$i] == 3) and (${$snp2}[$i] == 2));	
-   $cells[2]++ if ((${$snp1}[$i] == 1) and (${$snp2}[$i] == 3));	
-   $cells[1]++ if ((${$snp1}[$i] == 2) and (${$snp2}[$i] == 3));	
-   $cells[0]++ if ((${$snp1}[$i] == 3) and (${$snp2}[$i] == 3));	
-  }
-  if (defined $v) {
-	print_OUT("  AA Aa aa");
-	print_OUT("BB $cells[0]  $cells[1]  $cells[2]");
-	print_OUT("Bb $cells[3]  $cells[4]  $cells[5]");
-	print_OUT("bb $cells[6]  $cells[7]  $cells[8]");
-  }
-  my $h1 = sqrt($cells[0]);
-  my $h2 = sqrt($cells[2]);
-  my $h3 = sqrt($cells[6]);
-  my $h4 = sqrt($cells[8]);
-  my $corr = 2*($h1 * $h4 - $h2 * $h3)/sqrt(4*($h1 + $h2)*($h3 + $h4)*($h1 + $h3)*($h2 + $h4));
-  return($corr);
-}
 
 sub print_OUT {
-  my $string = shift;
-  print scalar localtime(), "\t$string\n";
-  print LOG scalar localtime(), "\t$string\n";
+	my $string = shift;
+	my @file_handles = @_; 	
+	print scalar localtime(), "\t$string\n";
+	unless (scalar @file_handles == 0){
+		foreach my $fh (@file_handles){
+			print $fh scalar localtime(), "\t$string\n";
+		}
+	}
 }
 
 sub read_weight_file {
@@ -1110,8 +1091,8 @@ sub read_weight_file {
     my $weights = shift; # weight for each snp
     my $header_present = shift;
     my $snp_2_gene = shift;
-    print_OUT("  '-> Reading weigths from [ $file ]");
-    open (WEIGHTS,$file) or print_OUT("I cannot open [ $file ]") and exit(1);
+    print_OUT("  '-> Reading weigths from [ $file ]",$LOG);
+    open (WEIGHTS,$file) or print_OUT("I cannot open [ $file ]",$LOG) and exit(1);
     my $count = 0;
     my $w_header = ();
     while(my $line = <WEIGHTS>){
@@ -1151,49 +1132,50 @@ sub read_weight_file {
 
 __END__
 
-=head1 NAME
-
- Running network analysis by greedy search
-
 =head1 SYNOPSIS
 
 script [options]
 
- 	-h, --help		print help message
- 	-m, --man		print complete documentation
- 	-report			how often to report advance
- 	-verbose, -v		useful for debugging
- 	
-        Input Files:
- 	-ped			Genotype file in PLINK PED format
- 	-map			SNP info file in PLINK MAP format
- 	-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam. 
- 	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
-        -snpmap, -m		Snp-to-gene mapping file
- 	-affy_to_rsid		Affy id to rs id mapping file
- 	
-        Output Files:
- 	-out, -o		Name of the output file
- 	-print_cor		print out SNP-SNP correlations
- 	
-        Analsis modifiers:
-        -gene_list, -g		Only analyse genes on the file provided
- 	-genes			Provide some gene name in command line, only these genes will be analyzed
- 	-all_genes		Analyze all genes in the snp-to-gene mapping file
- 	-chr			Anlyze a specific chromosome  
- 	-distance, -d		Max SNP-to-gene distance allowed (in kb)
+	-h, --help		print help message
+	-m, --man		print complete documentation
+	-report			how often to report advance
+	-verbose, -v		useful for debugging
+
+	Input Files:
+	-ped			Genotype file in PLINK PED format
+	-map			SNP info file in PLINK MAP format
+	-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam.
+	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
+	-snpmap, -m		Snp-to-gene mapping file
+	-affy_to_rsid		Affy id to rs id mapping file
+	-gmt			Gene-set definition file
+
+	Output Files:
+	-out, -o		Name of the output file
+	-print_cor		print out SNP-SNP correlations
+
+	Analsis modifiers:
+	-gene_list, -g		Only analyse genes on the file provided
+	-genes			Provide some gene name in command line, only these genes will be analyzed
+	-all_genes		Analyze all genes in the snp-to-gene mapping file
+	-chr			Anlyze a specific chromosome
+	-gene_type, -type	Only analyses genes of this type, e.g. protein_coding
+	-exclude_gene_type, -exclude_type	Exclude genes of this type from the analysis, e.g. pseudogenes
+	-distance, -d		Max SNP-to-gene distance allowed (in kb)
 	-correlation, -cor	SNP-SNP correlation file
- 	-lambda			lambda value to correct SNP statistics, if genomic control is used
- 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
-        -weights, -w            File with SNP weights
-        -w_header               Indicate if the SNP weight file has a header.
- 	
-        Sample Score Analysis:
-        -sample_score		Generate sample level score (it requieres sample level genotypes).
-        -ox_gprobs              Genotype probabilities in OXFORD format.
-        -covariates, -cov       File with covariates for the sample level analysis (TO BE IMPLEMENTED)
+	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+	-lambda			lambda value to correct SNP statistics, if genomic control is used
+	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
+	-no_forge		Do not do a forge analysis. e.g. if only performing sample-scoring
+	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2
+	-gmt_max_size		Max number of genes in gene-sets to be analysed. default = 2
 
-
+	Weigthing
+	-weights, -w            File with SNP weights
+	-w_header               Indicate if the SNP weight file has a header.
+	-weight_by_maf, -w_maf  Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
+	
+        
 =head1 OPTIONS
 
 =over 8
@@ -1224,17 +1206,38 @@ SNP info file in PLINK MAP format
 
 =item B<-bfile>
 
-Files in PLINK binary format, with extension *.bed, *.bim and *.fam. 
+Files in PLINK binary format, with extension *.bed, *.bim and *.fam.
+ 
+=item B<-assoc, -a>
+ 
+SNP association file, columns header is necessary and at leat columns with SNP and P names must be present. 
+ 
+=item B<-snpmap, -m>
 
+SNP-to-gene mapping file. Format is tab separated with fields:chromosome,start,end,Ensembl id, hugo id, description, SNP1, SNP2, ..., SNPN. 
+Each SNP has 4 fields separated by colons: id,position,alleles and strand. This may look overcomplicated but allows to map any kind of variation and store its information without having to use additional files. An example look like:
+
+1       67632083        67725662        ENSG00000162594 IL23R   KNOWN   protein_coding  Interleukin-23 receptor Precursor (IL-23R) [Source:UniProtKB/Swiss-Prot;Acc:Q5VWK5]             rs7538938:67132262:T/C:1        rs72669476:67132582:C/T:1       rs72019237:67132863:C/-:1       rs61197134:67132871:C/-:1       rs11208941:67133111:T/C:1 
+
+=item B<-affy_to_rsid>
+
+Affy id to rs id mapping file. Tab separated file, looks like:
+SNP_A-8389091	rs7593668
+
+=item B<-gmt>
+ 
+Gene-set definition file. Format is (tab separated) 
+NAME	Description	GENE1	GENE2	GENEN
+ 
 =item B<-out, -o>
 
 Name of the output file. Output file will be tab separated with the following columns: Ensembl_ID,Hugo id,gene_type,chromosome,start,end,min p-value in the gene, Sidak corrected minimum p-value, FORGE p-value, FORGE chi-square, FORGE degrees of freedom, Eigen value ratio method gene p-value, EVR chi-square, EVR degrees freedom, number of snps in gene, number effective tests(Gao et al;PDMID:19434714)
 An example would look like:ENSG00000162594	IL23R	protein_coding	1	67632083	67725662	3.491e-02	4.132e-01	2.128e-01	8.42305	6.04941	1.119e-01	28.17326	10.116917	 15
 
-=item B<-assoc, -a>
-
-SNP association file, columns header is necessary and at leat columns with SNP and P names must be present. 
-
+=item B<-print_cor>
+ 
+print out SNP-SNP correlations
+ 
 =item B<-gene_list, -g>
 
 Only analyse genes on the file provided. Ids must match either Ensembl Ids or Hugo ids present in the SNP-to-gene mapping file
@@ -1251,43 +1254,47 @@ Analyze all genes in the snp-to-gene mapping file
 
 Anlyze a specific chromosome, Chromosome code must match that of the SNP-to-gene mapping file
 
-=item B<-snpmap, -m>
+=item B<-gene_type, -type>
 
-SNP-to-gene mapping file. Format is tab separated with fields:chromosome,start,end,Ensembl id, hugo id, description, SNP1, SNP2, ..., SNPN. 
-Each SNP has 4 fields separated by colons: id,position,alleles and strand. This may look overcomplicated but allows to map any kind of variation and store its information without having to use additional files. An example look like:
+Only analyses genes of this type, e.g. protein_coding
+
+=item B<-exclude_gene_type, -exclude_type>
  
-1       67632083        67725662        ENSG00000162594 IL23R   KNOWN   protein_coding  Interleukin-23 receptor Precursor (IL-23R) [Source:UniProtKB/Swiss-Prot;Acc:Q5VWK5]             rs7538938:67132262:T/C:1        rs72669476:67132582:C/T:1       rs72019237:67132863:C/-:1       rs61197134:67132871:C/-:1       rs11208941:67133111:T/C:1 
+Exclude genes of this type from the analysis, e.g. pseudogenes
 
+=item B<-distance, -d>
+ 
+Max SNP-to-gene distance allowed (in kb) 
+ 
 =item B<-correlation, -cor>
 
 SNP-SNP correlation file. Space separated file with 3 columns, first 2 the SNP ids the the 3th the correlation between them. Like:
 
 rs6660226 rs11209018 0.089
 
-=item B<-affy_to_rsid>
-
-Affy id to rs id mapping file. Tab separated file, looks like:
-SNP_A-8389091	rs7593668
+=item B<-pearson_genotypes>
+ 
+Calculate SNP-SNP correlation with a pearson correlation for categorical variables as described on S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
 
 =item B<-lambda>
 
 lambda value to correct SNP statistics, if genomic control is used
 
-=item B<-print_cor>
+=item B<-gc_correction>
 
-print out SNP-SNP correlations
+Correct the SNP pvalues by the genomic control method. It will calculate the lambda from the data itself. PLEASE MAKE SURE YOU DO NOT FILTER THE SNPS BEFORE RUNNING FORGE OR THE CORRECTION MAY BE ERRONEOUS.
 
-=item B<-pearson_genotypes>
+=item B<-no_forge>
 
-Calculate SNP-SNP correlation with a pearson correlation for categorical variables as described on S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
+Do not do a forge analysis. e.g. if only performing sample-scoring
 
-=item B<-distance, -d>
+=item B<-gmt_min_size>
+ 
+Min number of genes in gene-sets to be analysed. default = 2
 
-Max SNP-to-gene distance allowed (in kb) 
-
-=item B<-sample_score>
-
-Generate a gene-score for each gene. This method make use of the FORGE method but uses information from risk alleles count and their odd-ratios as weights for each SNP. The calculation is repeated on each sample, generating one gene-score for each sample. Because the p-values used are the same for all samples this score carries information about the combination of risk alleles and their odd-ratios. However, it is different from using simply the count of risk alleles because it account for the LD between the SNPs. This method is still under development and the documentation will be completed later.
+=item B<-gmt_max_size>
+ 
+Max number of genes in gene-sets to be analysed. default = 2
 
 =item B<-weights, -w>
 
@@ -1301,13 +1308,10 @@ Please note that SNPs without weights will internally get the weights set to zer
 
 Indicate if the SNP weight file has a header.
 
-=item B<-ox_gprobs>
+=item B<-weight_by_maf, -w_maf>
 
-File with genotype probabilities in OXFORD format. See http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html for details in the file format. An example is
-1	rs10489629	67400370 2 4 1 0 0 0 1 0 1 0 0
-Columns are chromosome, SNP id, SNP position, minor alelle (A), major alelle (B), prob for AA at sample1,  prob for AB at sample1,  prob for BB at sample1, prob for AA at sample2, etc.
-
-
+Weight each SNP its the minor allele frequency (MAF). The actual weight is 1/MAF.
+ 
 =back
 
 =head1 DESCRIPTION

@@ -115,17 +115,17 @@ sub get_fix_and_radom_meta_analysis {
 		$W = 1/$SE; 
 	}
 	# calculate fix effect estimate
-	my $B_fix = dsum($B*$W)/$W->dsum;
 	my $norm_w_fix = $W/$W->dsum;
+	my $B_fix = dsum($B*$norm_w_fix)/$norm_w_fix->dsum;
+	#my $B_fix = dsum($B*$W)/$W->dsum;
 	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
 	#my $V_fix = dsum($W*$W->transpose*$VarCov);
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
-	my $fix_Z = $B_fix/sqrt($V_fix);
 	
 	my $B_stouffer_fix = dsum($B*$norm_w_fix)/sqrt($V_fix);
 	
 	# calculate heteroogeneity parameter Q
-	my $Q = 0.0; 
+	my $Q = 0.0;
 	{
 		my $cor = $VarCov->copy();
 		$cor->diagonal(0,1) .=0;
@@ -158,12 +158,12 @@ sub get_fix_and_radom_meta_analysis {
 	} else {
 		$w_star = 1/( $tau_squared + $SE);
 	}
-	my $B_random = dsum( $B*$w_star)/$w_star->dsum;
 	my $norm_w_random = $w_star/$w_star->dsum;
+	my $B_random = dsum( $B*$norm_w_random)/$norm_w_random->dsum;
+	#my $B_random = dsum( $B*$w_star)/$w_star->dsum;
 	my $V_random = dsum($norm_w_random*$norm_w_random->transpose*$VarCov);
 	#	my $V_random = dsum($w_star*$w_star->transpose*$VarCov);
 	my $random_chi_square_df1 = ($B_random**2)/$V_random;
-	my $random_Z = $B_random/sqrt($V_random);
 	
 	my $B_stouffer_random = dsum($B*$norm_w_random)/sqrt($V_random);
 
@@ -176,12 +176,13 @@ sub get_fix_and_radom_meta_analysis {
 		'V_random' => $V_random,
 		'Chi_fix' => $fix_chi_square_df1,
 		'Chi_random' => $random_chi_square_df1,
-		'Z_fix' => $fix_Z,
-		'Z_random' => $random_Z,
 		'Q' => $Q,
 		'I2' => $I_squared,
 		'tau_squared' => $tau_squared,
 		'N' => $N,
+		'Z_P_fix' => gsl_cdf_gaussian_P( -1 * $B_fix ,sqrt($V_fix )),
+		'Z_P_random' => gsl_cdf_gaussian_P( -1 * $B_random,sqrt($V_random) ),
+		'Q_P' => 1- gsl_cdf_chisq_P($Q ,$N -1),
 	};
 	return $back;
 }

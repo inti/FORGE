@@ -135,7 +135,7 @@ $OUT->open(">$out") or print_OUT("I can not open [ $out ] to write to",$LOG) and
 
 print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
 print $OUT "\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df";
-print $OUT "\tZ_fix\tZ_P_fix\tZ_random\tZ_P_random";
+print $OUT "\tB_fix\tVar_fix\tB_P_fix\tB_random\tVar_random\tB_P_random";
 print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 
@@ -710,8 +710,6 @@ if (defined $bfile) {
 			'V_random' => "NA",
 			'Chi_fix' => "NA",
 			'Chi_random' => "NA",
-			'Z_fix' => "NA",
-			'Z_random' => "NA",
 			'Z_P_fix' => "NA",
 			'Z_P_random' => "NA",
 			'Q' => "NA",
@@ -720,12 +718,7 @@ if (defined $bfile) {
 			'tau_squared' => "NA",
 			'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
 		};
-	} else {
-		$z_based_p->{'Z_P_fix'} = gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_fix'});
-		$z_based_p->{'Z_P_random'} = gsl_cdf_ugaussian_P( -1 * $z_based_p->{'Z_random'});
-		$z_based_p->{'Q_P'} = 1- gsl_cdf_chisq_P($z_based_p->{'Q'},$z_based_p->{'N'}-1);
-	
-	}
+	} 
 	my $pvalue_based_p = gene_pvalue($gn);
 
 	print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
@@ -734,9 +727,11 @@ if (defined $bfile) {
 		$pvalue_based_p->{fisher},
 		$pvalue_based_p->{fisher_chi},
 		$pvalue_based_p->{fisher_df},
-		$z_based_p->{'Z_fix'},
+		$z_based_p->{'B_fix'},
+		$z_based_p->{'V_fix'},
 		$z_based_p->{'Z_P_fix'},
-		$z_based_p->{'Z_random'},
+		$z_based_p->{'B_random'},
+		$z_based_p->{'V_random'},
 		$z_based_p->{'Z_P_random'},
 		$z_based_p->{'I2'},
 		$z_based_p->{'Q'},

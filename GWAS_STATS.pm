@@ -70,8 +70,8 @@ sub z_based_gene_pvalues {
 	if (scalar @{$gene->{'geno_mat_rows'}} < 2){
 		return(-9);
 	}
-	my $cov = $gene->{cor_ld_r}**2;
-	
+	#my $cov = $gene->{cor_ld_r}**2;
+	my $cov = $gene->{cor_ld_r};
 	my $pvals = $gene->{'pvalues'};
 	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;
 	$pvals->index( which($pvals == 0) ) .= double 2.2e-16;
@@ -118,7 +118,8 @@ sub get_fix_and_radom_meta_analysis {
 	my $norm_w_fix = $W/$W->dsum;
 	my $B_fix = dsum($B*$norm_w_fix)/$norm_w_fix->dsum;
 	#my $B_fix = dsum($B*$W)/$W->dsum;
-	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
+	#my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
+	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*abs($VarCov));
 	#my $V_fix = dsum($W*$W->transpose*$VarCov);
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
 	

@@ -15,6 +15,7 @@ use Data::Dumper;
 # Load local functions
 use GWAS_IO;
 use GWAS_STATS;
+use CovMatrix;
 
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
@@ -870,10 +871,13 @@ sub deal_with_correlations {
 	my $gn = shift;
 	my $correlation = shift;
 	my %new_corrs = ();
-	my $pearson_cor = corr_table($gn->{genotypes});
+	#my $pearson_cor = corr_table($gn->{genotypes});
+	my $shrunked_matrix = cov_shrink($gn->{genotypes}->transpose);
+	my $pearson_cor = $shrunked_matrix->{cor};
 	my $n = scalar @{ $gn->{'geno_mat_rows'} };
 	my $cor_ld_r = zeroes $n,$n; 
 	$cor_ld_r->diagonal(0,1) .= 1;
+=h
 	for (my $i = 0; $i < $n; $i++){
 		for (my $j = $i; $j < $n; $j++){
 			next if ($j == $i);
@@ -890,6 +894,8 @@ sub deal_with_correlations {
 			}
 		}
 	}
+=cut
+	$cor_ld_r = $pearson_cor;
 	return($pearson_cor,$cor_ld_r,\%new_corrs);
 }
 

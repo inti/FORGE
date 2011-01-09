@@ -120,11 +120,10 @@ sub get_fix_and_radom_meta_analysis {
 	}
 	# calculate fix effect estimate
 	my $norm_w_fix = $W/$W->dsum;
-	my $B_fix = dsum($B*$norm_w_fix)/$norm_w_fix->dsum;
 	#my $B_fix = dsum($B*$W)/$W->dsum;
-	#my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
-	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*abs($VarCov));
 	#my $V_fix = dsum($W*$W->transpose*$VarCov);
+	my $B_fix = dsum($B*$norm_w_fix)/$norm_w_fix->dsum;
+	my $V_fix = dsum($norm_w_fix*$norm_w_fix->transpose*$VarCov);
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
 	
 	my $stouffer_w_fix = $W/dsum($W**2);

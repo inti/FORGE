@@ -363,7 +363,15 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 	  chomp($read);
 	  # the line is separate in gene info and snps. the section are separated by a tab.
 	  my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
-	  my @first_snp_n_fields =  split(/\:/,$m[0]);
+		#check if gene was in the list of genes i want to analyze
+		unless ( defined $all_genes ) {
+			next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
+		}
+		if (defined $analysis_chr){
+			next if ($analysis_chr ne $chr);
+		}
+
+		my @first_snp_n_fields =  split(/\:/,$m[0]);
 	  if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 
 	  # get all mapped snps within the distance threshold,
@@ -376,15 +384,6 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 	  }
 	   
 	   next if (scalar @mapped_snps == 0);
-	   # get the gene position info
-	   #check if gene was in the list of genes i want to analyze
-	   unless ( defined $all_genes ) {
-		  next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
-	   }
-	   if (defined $analysis_chr){
-		next if ($analysis_chr ne $chr);
-	   }
-		
 	   # create a pseudo-hash with the gene info
 	   $gene{$ensembl} = {
 			'hugo'      => $hugo,

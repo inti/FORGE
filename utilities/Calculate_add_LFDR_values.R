@@ -24,26 +24,58 @@ for (e in commandArgs()) {
 
 library(locfdr)
 if (header == "T"){
-	data<-read.table(filein,sep = "\t",skip = 1) 
+	data<-read.table(filein,sep = "\t",header=T) 
 } else {
 	data<-read.table(filein,sep = "\t") 
 }
 # recalculate the FORGE p-values. This because usually does not work on double precission
-data[,9]<-pchisq(data[,10],df= data[,11],lower.tail=F); 
+data[which(data[,24] != 1),9]<-pchisq(data[which(data[,24] != 1),10],df= data[which(data[,24] != 1),11],lower.tail=F); 
+if (length(which(as.numeric(data[,24]) == 1)) > 0) { 
+	data[which(data[,24] == 1),9]<- data[which(data[,24] == 1),7] # add fisher p-values  
+	data[which(data[,24] == 1),8]<- data[which(data[,24] == 1),7] # add sidak p-values
+	
+	data[which(data[,24] == 1),14]<- data[which(data[,24] == 1),7] # add Z_P_fix 
+	
+	data[which(data[,24] == 1),17]<- data[which(data[,24] == 1),7] # add Z_P_random 
+}
+
 # re-order that data
-data<-data[order(data[,9]),]
-data$new_sidak<-apply(data,1, function(x) { if (as.numeric(x[8]) == "0") { return(x[7])} else { return(x[8]) }; if (x[8]==1){return(0.999999999999)} else {return(x[8])} })
+data<-data[order(data[,14]),]
 
-if (length(which(as.numeric(data$new_sidak) == 1)) > 0) { data[which(as.numeric(data$new_sidak) == 1),]$new_sidak<-0.999999999999 }
-if (length(which(as.numeric(data[,9]) == 1)) > 0) { data[which(as.numeric(data[,9]) == 1),9]<-0.999999999999 }
+#SIDAK
+data$new_sidak<-data[,8]
+data[which(data$new_sidak==1),"new_sidak"]<-0.999999999999
+data[which(data$new_sidak==0),"new_sidak"]<-data[which(data$new_sidak==0),7]*data[which(data$new_sidak==0),24]
 
-data[which(data[,9]==1),9]<-0.999999999999
-data_fisher<-data[which(data[,9] != "NA"),9]
-data_fisher_fdr<-locfdr(qnorm(data_fisher,lower.tail=F),plot=0)
-data[which(data[,9] != "NA"),"FORGE_locfdr"]<-data_fisher_fdr$fdr
-
-data_sidak<-data[which(data[,8] != "NA"),"new_sidak"]
+data_sidak<-data[which(is.na(data[,"new_sidak"]) == FALSE),"new_sidak"]
 data_sidak_fdr<-locfdr(qnorm(as.numeric(data_sidak),lower.tail=F),plot=0)
-data$sidak_locfdr<-data_sidak_fdr$fdr
+data[which(is.na(data[,"new_sidak"]) == FALSE),"SIDAK_locfdr"]<-data_sidak_fdr$fdr
+
+#FISHER
+data$new_fisher<-data[,9]
+data[which(data$new_fisher==1),"new_fisher"]<-0.999999999999
+data[which(data$new_fisher==0),"new_fisher"]<-data[which(data$new_fisher==0),7]*data[which(data$new_fisher==0),24]
+
+data_fisher<-data[which(is.na(data[,"new_fisher"]) == FALSE),"new_fisher"]
+data_fisher_fdr<-locfdr(qnorm(as.numeric(data_fisher),lower.tail=F),plot=0)
+data[which(is.na(data[,"new_fisher"]) == FALSE),"FISHER_locfdr"] <-data_fisher_fdr$fdr
+
+#Z-fix
+data$new_Z_FIX_P<-data[,14]
+data[which(data$new_Z_FIX_P==1),"new_Z_FIX_P"]<-0.999999999999
+data[which(data$new_Z_FIX_P==0),"new_Z_FIX_P"]<-data[which(data$new_Z_FIX_P==0),7]*data[which(data$new_Z_FIX_P==0),24]
+
+data_Z_FIX_P<-data[which(is.na(data[,"new_Z_FIX_P"]) == FALSE),"new_Z_FIX_P"]
+data_Z_FIX_P_fdr<-locfdr(qnorm(as.numeric(data_Z_FIX_P),lower.tail=F),plot=0)
+data[which(is.na(data[,"new_Z_FIX_P"]) == FALSE),"Z_FIX_P_locfdr"] <-data_Z_FIX_P_fdr$fdr
+
+#Z-RANDOM
+data$new_Z_RANDOM_P<-data[,17]
+data[which(data$new_Z_RANDOM_P==1),"new_Z_RANDOM_P"]<-0.999999999999
+data[which(data$new_Z_RANDOM_P==0),"new_Z_RANDOM_P"]<-data[which(data$new_Z_RANDOM_P==0),7]*data[which(data$new_Z_RANDOM_P==0),24]
+
+data_Z_RANDOM_P<-data[which(is.na(data[,"new_Z_RANDOM_P"]) == FALSE),"new_Z_RANDOM_P"]
+data_Z_RANDOM_P_fdr<-locfdr(qnorm(as.numeric(data_Z_RANDOM_P),lower.tail=F),plot=0)
+data[which(is.na(data[,"new_Z_RANDOM_P"]) == FALSE),"Z_RANDOM_P_locfdr"]<-data_Z_RANDOM_P_fdr$fdr
 
 write.table(data,file=fileout, quote=F, row.names=F,col.names=T,sep = "\t")

@@ -123,7 +123,8 @@ sub get_fix_and_radom_meta_analysis {
 	#my $V_fix = dsum($W*$W->transpose*$VarCov);
 	my $fix_chi_square_df1 = ($B_fix**2)/$V_fix;
 	
-	my $B_stouffer_fix = dsum($B*$norm_w_fix)/sqrt($V_fix);
+	my $stouffer_w_fix = $W/dsum($W**2);
+	my $B_stouffer_fix = dsum($B*$norm_w_fix)/sqrt(dsum($stouffer_w_fix*$stouffer_w_fix->transpose*$VarCov));
 	
 	# calculate heteroogeneity parameter Q
 	my $Q = 0.0;
@@ -165,8 +166,9 @@ sub get_fix_and_radom_meta_analysis {
 	my $V_random = dsum($norm_w_random*$norm_w_random->transpose*$VarCov);
 	#	my $V_random = dsum($w_star*$w_star->transpose*$VarCov);
 	my $random_chi_square_df1 = ($B_random**2)/$V_random;
-	
-	my $B_stouffer_random = dsum($B*$norm_w_random)/sqrt($V_random);
+
+	my $stouffer_w_random = $w_star/dsum($w_star**2);
+	my $B_stouffer_random = dsum($B*$norm_w_random)/sqrt(dsum($stouffer_w_random*$stouffer_w_random->transpose*$VarCov));
 
 	my $back =  {
 		'B_stouffer_fix' => $B_stouffer_fix,

@@ -24,7 +24,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
-	$gmt_min_size,$gmt_max_size
+	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,
 );
 
 GetOptions(
@@ -48,6 +48,7 @@ GetOptions(
    'gc_correction' => \$gc_correction,
    'print_cor' => \$print_cor,
    'pearson_genotypes' => \$pearson_genotypes,
+	'use_ld' => \$use_ld_as_corr,
    'distance|d=i' => \$distance, 
    'sample_score' => \$sample_score,
    'weights|w=s' => \@weights_file,
@@ -694,7 +695,7 @@ if (defined $bfile) {
 	  
 	# Calculate the genotypes correlation matrix
 	my $more_corrs = "";
-	($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation);
+	($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);
 	%correlation = (%correlation,%{$more_corrs});
 	  
 	# Calculate the weights for the gene
@@ -855,7 +856,13 @@ sub deal_with_weights {
 	# the weights for the mean are the correlation between the SNP, In that way the
 	# weights reflect the correlation pattern of the SNPs 
 	# weights reflect the correlation pattern of the SNPs
-	my $w_matrix = $back * abs($gn->{cor_ld_r}); # multiply the weights by the correaltions
+	my $C;
+	if (defined $gn->{cor_ld_r}){
+		$C = $gn->{cor_ld_r};
+	} else {
+		$C = $gn->{cor};
+	} 
+	my $w_matrix = $back * abs($C); # multiply the weights by the correaltions
 	my @dims = $w_matrix->dims();
 	$w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$back->dsum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
 	if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
@@ -870,32 +877,34 @@ sub deal_with_weights {
 sub deal_with_correlations {
 	my $gn = shift;
 	my $correlation = shift;
+	my $use_ld = shift;
 	my %new_corrs = ();
-	#my $pearson_cor = corr_table($gn->{genotypes});
-	my $shrunked_matrix = cov_shrink($gn->{genotypes}->transpose);
-	my $pearson_cor = $shrunked_matrix->{cor};
+	my $shrunken_matrix = cov_shrink($gn->{genotypes}->transpose);
+	my $pearson_cor = $shrunken_matrix->{cor};
 	my $n = scalar @{ $gn->{'geno_mat_rows'} };
-	my $cor_ld_r = zeroes $n,$n; 
-	$cor_ld_r->diagonal(0,1) .= 1;
-=h
-	for (my $i = 0; $i < $n; $i++){
-		for (my $j = $i; $j < $n; $j++){
-			next if ($j == $i);
-			if (exists $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]}){
-				set $cor_ld_r, $i, $j, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
-				set $cor_ld_r, $j, $i, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
-			} else {
-				my $ld = calculate_LD_stats([ $gn->{'genotypes'}->(,$i)->list ],[ $gn->{'genotypes'}->(,$j)->list ]);	
-				set $cor_ld_r, $i, $j, $ld->{r};
-				set $cor_ld_r, $j, $i, $ld->{r};
-				
-				$new_corrs{ $gn->{'geno_mat_rows'}->[$i] }{ $gn->{'geno_mat_rows'}->[$j] } = $ld->{r};
-				$new_corrs{ $gn->{'geno_mat_rows'}->[$j] }{ $gn->{'geno_mat_rows'}->[$i] } = $ld->{r};
+	my $cor_ld_r = undef; zeroes $n,$n; 
+	if (defined $use_ld){
+		$cor_ld_r = zeroes $n,$n; 
+		for (my $i = 0; $i < $n; $i++){
+			for (my $j = $i; $j < $n; $j++){
+				next if ($j == $i);
+				if (exists $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]}){
+					set $cor_ld_r, $i, $j, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+					set $cor_ld_r, $j, $i, $correlation->{$gn->{'geno_mat_rows'}->[$i]}{$gn->{'geno_mat_rows'}->[$j]};
+				} else {
+					my $ld = calculate_LD_stats([ $gn->{'genotypes'}->(,$i)->list ],[ $gn->{'genotypes'}->(,$j)->list ]);	
+					set $cor_ld_r, $i, $j, $ld->{r};
+					set $cor_ld_r, $j, $i, $ld->{r};
+					
+					$new_corrs{ $gn->{'geno_mat_rows'}->[$i] }{ $gn->{'geno_mat_rows'}->[$j] } = $ld->{r};
+					$new_corrs{ $gn->{'geno_mat_rows'}->[$j] }{ $gn->{'geno_mat_rows'}->[$i] } = $ld->{r};
+				}
 			}
 		}
-	}
-=cut
-	$cor_ld_r = $pearson_cor;
+
+	} else {
+		$cor_ld_r = undef;
+	}	
 	return($pearson_cor,$cor_ld_r,\%new_corrs);
 }
 
@@ -1164,6 +1173,7 @@ script [options]
 	-distance, -d		Max SNP-to-gene distance allowed (in kb)
 	-correlation, -cor	SNP-SNP correlation file
 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
+	-use_ld				Use Linkage Disequilibrium as measure of SNP-SNP correlation
 	-lambda			lambda value to correct SNP statistics, if genomic control is used
 	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
 	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2
@@ -1274,6 +1284,10 @@ rs6660226 rs11209018 0.089
 =item B<-pearson_genotypes>
  
 Calculate SNP-SNP correlation with a pearson correlation for categorical variables as described on S. Wellek, A. Ziegler, Hum Hered 67, 128 (2009).
+
+=item B<-use_ld>
+ 
+Use Linkage Disequilibrium as measure of SNP-SNP correlation. Default is Pearson's correlation.
 
 =item B<-lambda>
 

@@ -70,8 +70,12 @@ sub z_based_gene_pvalues {
 	if (scalar @{$gene->{'geno_mat_rows'}} < 2){
 		return(-9);
 	}
-	#my $cov = $gene->{cor_ld_r}**2;
-	my $cov = $gene->{cor_ld_r};
+	my $cov;
+	if (defined $gene->{cor_ld_r}){
+		$cov = $gene->{cor_ld_r}**2;
+	} else {
+		$cov = $gene->{cor}**2;
+	}
 	my $pvals = $gene->{'pvalues'};
 	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;
 	$pvals->index( which($pvals == 0) ) .= double 2.2e-16;

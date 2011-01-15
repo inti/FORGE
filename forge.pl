@@ -902,13 +902,12 @@ sub deal_with_weights {
 	my $back = null;
 	my $N = scalar @{ $gn->{geno_mat_rows} };
 	if (defined @$w_files){
-        $back = generate_weights_for_a_gene($gn->{geno_mat_rows},$weights);
-    } else {
-        $back = ones $N;
-        $back *= 1/$N;
-        $back /= $back->dsum;
-    }
-	
+        	$back = generate_weights_for_a_gene($gn->{geno_mat_rows},$weights);
+    	} else {
+        	$back = ones $N;
+        	$back *= 1/$N;
+        	$back /= $back->dsum;
+    	}
 	# if desired weigth by the 1/MAF
 	if (defined $w_by_maf){
 		my $MAF_w = get_maf_weights($gn->{genotypes});
@@ -930,7 +929,7 @@ sub deal_with_weights {
 	my $w_matrix = $back * abs($C); # multiply the weights by the correaltions
 	my @dims = $w_matrix->dims();
 	$w_matrix = pdl map { $w_matrix->(,$_)->flat->sum/$back->dsum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
-	if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->length; } # make sure NO weights equal 0
+	if ($w_matrix->min == 0){ $w_matrix += $w_matrix->(which($w_matrix == 0))->min/$w_matrix->nelem; } # make sure NO weights equal 0
 	$w_matrix /= $w_matrix->sum; # make sure weights sum 1
 	
 	$back = $w_matrix/$w_matrix->sum;
@@ -947,9 +946,9 @@ sub deal_with_correlations {
 	my $shrunken_matrix = cov_shrink($gn->{genotypes}->transpose);
 	my $pearson_cor = $shrunken_matrix->{cor};
 	my $n = scalar @{ $gn->{'geno_mat_rows'} };
-	my $cor_ld_r = undef; zeroes $n,$n; 
+	my $cor_ld_r = undef; #zeroes $n,$n; 
 	if (defined $use_ld){
-		$cor_ld_r = zeroes $n,$n; 
+		$cor_ld_r = stretcher(ones $n); 
 		for (my $i = 0; $i < $n; $i++){
 			for (my $j = $i; $j < $n; $j++){
 				next if ($j == $i);
@@ -970,6 +969,9 @@ sub deal_with_correlations {
 	} else {
 		$cor_ld_r = undef;
 	}	
+	print $pearson_cor,"\n";
+	print $cor_ld_r;
+	getc;
 	return($pearson_cor,$cor_ld_r,\%new_corrs);
 }
 

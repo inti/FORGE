@@ -969,9 +969,6 @@ sub deal_with_correlations {
 	} else {
 		$cor_ld_r = undef;
 	}	
-	print $pearson_cor,"\n";
-	print $cor_ld_r;
-	getc;
 	return($pearson_cor,$cor_ld_r,\%new_corrs);
 }
 

@@ -135,7 +135,7 @@ my $OUT = new IO::File;
 $OUT->open(">$out") or print_OUT("I can not open [ $out ] to write to",$LOG) and exit(1);
 
 print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
-print $OUT "\tmin_p\tmin_p_SIDAK\tFORGE\tFORGE_chi-square\tFORGE_df";
+print $OUT "\tmin_p\tmin_p_SIDAK\tFISHER\tFISHER_chi-square\tFISHER_df";
 print $OUT "\tB_fix\tVar_fix\tB_P_fix\tB_random\tVar_random\tB_P_random";
 print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";

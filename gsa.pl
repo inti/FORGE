@@ -10,6 +10,10 @@ use PDL::Stats::Basic;
 use PDL::Ufunc;
 use Data::Dumper;
 
+# Load local functions
+use GWAS_IO;
+use GWAS_STATS;
+
 our (	$help, $man, $gmt, $pval,
 	$perm, $out, $max_size, 
 	$min_size, $recomb_intervals,
@@ -20,7 +24,7 @@ our (	$help, $man, $gmt, $pval,
 	$best_x_interval, $gs_coverage, $interval_merge,
 	$interval_merge_by_chr, $node_similarity, $cgnets_all,
 	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
-	$snpmap,
+	$snpmap, $distance, $affy_to_rsid,
 );
 
 GetOptions(
@@ -54,7 +58,9 @@ GetOptions(
 	'n_runs=i' => \$max_processes,
 	'snp_assoc=s@' => \$snp_assoc,
 	'bfile=s'	=> \$bfile,
-	'snpmap|m' => \$snpmap,
+	'snpmap|m=s@' => \$snpmap,
+	'distance|d=i' => \$distance,
+	'affy_to_rsid=s' => \$affy_to_rsid,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -63,48 +69,52 @@ pod2usage(0) if (not defined $pval);
 pod2usage(0) if (not defined $out);
 pod2usage(0) if (not defined $gmt);
 
-my $VERSION = "0.5.5";
-print scalar localtime(), "\t", "Running version  [ $VERSION ] of GSA perl script\n";	
+my $LOG = new IO::File; 
+$LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$LOG) and exit(1);
+
+print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
+print_OUT("LOG file will be written to [ $out.log ]",$LOG);
 
 if (defined $gs_coverage){
-	print scalar localtime(), "\t", "Removing pathway with less than [ " . $gs_coverage*100 . " % ] coverage\n";
+	print_OUT("Removing pathway with less than [ " . $gs_coverage*100 . " % ] coverage",$LOG);
 }
 defined $gs_coverage or $gs_coverage = 0;
 defined $interval_merge_by_chr and $interval_merge = "inf";
 if (defined $interval_merge and defined $best_x_interval){
-	print scalar localtime(), "\t", "Using segment distance of [ $interval_merge ] to join recombination intervals during sampling\n";
+	print_OUT("Using segment distance of [ $interval_merge ] to join recombination intervals during sampling",$LOG);
 }
 if (defined $perm){
-	print scalar localtime(), "\t", "Will run [ $perm ] permutations to estimate the mean and std deviation of the statistics undel the null\n";
+	print_OUT("Will run [ $perm ] permutations to estimate the mean and std deviation of the statistics undel the null",$LOG);
 	if (defined $best_x_interval){
-		print scalar localtime(), "\t", "Permutations with bext-per-interval option not supported at the moment.\n";
+		print_OUT("Permutations with bext-per-interval option not supported at the moment.",$LOG);
 		exit(0);
 	}
 }
 if (defined $input_z and not defined $perm){ $perm = 10_000; }
 
 defined $interval_merge or $interval_merge = 0;
-
+defined $distance or $distance = 20;
 defined $report or $report = 100;
 defined $max_size or $max_size = 99_999_999; 
 defined $min_size or $min_size = 10;
-print scalar localtime(), "\t", "Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size\n";
+print_OUT("Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size",$LOG);
 
 if (defined $recomb_intervals) {
 	if ((defined $best_x_interval) and (defined $complete_interval_sampling)){
-		die("Please choose one of the two sampling scheems -best_per_interval or -complete_interval_samplig\nFor more information type gsa.pl -man\n");
+		print_OUT("Please choose one of the two sampling scheems -best_per_interval or -complete_interval_samplig\nFor more information type gsa.pl -man",$LOG);
+		exit(1);
 	}
 	if (not defined $complete_interval_sampling){
 		$best_x_interval = 1;
-		print scalar localtime(), "\t", "Using best gene per recombination interval for permutation sampling\n";
+		print_OUT("Using best gene per recombination interval for permutation sampling",$LOG);
 	} elsif (defined $complete_interval_sampling) {
-		print scalar localtime(), "\t", "Using all genes in recombination interval for permutation sampling\n";
+		print_OUT("Using all genes in recombination interval for permutation sampling",$LOG);
 	}
 }
 
 defined $set_stat or $set_stat = 'mean';
 my $network_stat = defined_set_stat($set_stat);
-print scalar localtime(), "\t", "Gene-set statistics set to [ $set_stat ]\n";
+print_OUT("Gene-set statistics set to [ $set_stat ]",$LOG);
 
 my %ref_genes = ();
 if (defined $ref_list){
@@ -112,11 +122,11 @@ if (defined $ref_list){
 	my @tmp = <REF>;
 	chomp(@tmp);
 	map {$ref_genes{lc($_)} = ""; } @tmp;
-	print scalar localtime(), "\t", "[ " . scalar (keys %ref_genes) . " ] read from [ $ref_list ]\n";
+	print_OUT("[ " . scalar (keys %ref_genes) . " ] read from [ $ref_list ]",$LOG);
 }
 
 my %gene_data = ();
-print scalar localtime(), "\t", "Reading gene stats [ $pval ]\n";
+print_OUT("Reading gene stats [ $pval ]",$LOG);
 open( PVAL, $pval ) or die $!;
 while (my $line = <PVAL>) {
 	chomp($line);
@@ -127,8 +137,9 @@ while (my $line = <PVAL>) {
 	}
 	next if ( $p eq "NA" );
 	unless (defined  $input_z){
+		next if ( $p !~ m/\d/);
 		if ( $p == 0 ) {
-			print scalar localtime(), "\t", "WARNING: This gene [ " . uc($gn) . " ] has p-value equal [ $p ], I do not know how to transformit to Z score\n";
+			print_OUT("WARNING: This gene [ " . uc($gn) . " ] has p-value equal [ $p ], I do not know how to transformit to Z score",$LOG);
 			next;
 		}
 	}
@@ -150,13 +161,12 @@ while (my $line = <PVAL>) {
 					'recomb_int' => [],
 					'node_similarity'=> null,
 					'genotypes' => null,
-					'geno_mat_rows' => [],
-					'snps' => [],
+					'snps' => undef,
 		};
 	}
 }
 close(PVAL);
-print scalar localtime(), "\t", "   '-> [ " . scalar (keys %gene_data) . " ] genes will be analysed\n";
+print_OUT("   '-> [ " . scalar (keys %gene_data) . " ] genes will be analysed",$LOG);
 
 # if a CGNets analysis is performed.
 # read the list of genes for which gene-sets are to be analysed
@@ -165,24 +175,24 @@ print scalar localtime(), "\t", "   '-> [ " . scalar (keys %gene_data) . " ] gen
 my @candidate_genes = ();
 if (defined $cgnets){
 	open (LIST, $cgnets) or die $!;
-	print scalar localtime(), "\t", "Reading CGNets seed genes from [ $cgnets ]\n";
+	print_OUT("Reading CGNets seed genes from [ $cgnets ]",$LOG);
 	@candidate_genes = <LIST>;
 	close(LIST);
 	chomp(@candidate_genes);
 	my %tmp = ();
 	map { $tmp{lc($_)} = ""; } @candidate_genes;
 	@candidate_genes = keys %tmp;
-	print scalar localtime(), "\t", "  '-> [ " . scalar @candidate_genes . " ] unique CGNets seeds read\n";
+	print_OUT("  '-> [ " . scalar @candidate_genes . " ] unique CGNets seeds read",$LOG);
 	for (my $i = 0; $i < scalar @candidate_genes; $i++){
 		$candidate_genes[$i] = lc($candidate_genes[$i]);
 		if (not exists $gene_data{$candidate_genes[$i]}){ splice(@candidate_genes,$i,1); }
 	}
 	if (scalar @candidate_genes == 0){
-		print scalar localtime(), "\t", "None of the CGNets seed genes has statistics\n";
-		print scalar localtime(), "\t", "Bye for now\n";
+		print_OUT("None of the CGNets seed genes has statistics",$LOG);
+		print_OUT("Bye for now",$LOG);
 		exit(1);
 	}
-	print scalar localtime(), "\t", "  '-> of them [ " . scalar @candidate_genes . " ] have statistics\n";
+	print_OUT("  '-> of them [ " . scalar @candidate_genes . " ] have statistics",$LOG);
 }
 
 
@@ -194,11 +204,12 @@ if ( defined $recomb_intervals) {
 
 # stats for all genes in pathways
 my %genes_in_paths = ();
+my %gene_2_paths_map = ();
 # store all pathways and it information 
 my @pathways        = ();
 foreach my $gene_set_file (@$gmt){
-	print scalar localtime(), "\t", "Reading gene-set definitions from [ $gene_set_file ]\n";
-	open( GMT, $gene_set_file ) or die $!;
+	print_OUT("Reading gene-set definitions from [ $gene_set_file ]",$LOG);
+	open( GMT, $gene_set_file ) or print_OUT("Cannot open [ $gene_set_file ]") and die $!;
 	while ( my $path = <GMT> ) {
 		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
 		my @p_stats = ();
@@ -236,6 +247,7 @@ foreach my $gene_set_file (@$gmt){
 				'node_weigths' => null,
 				'z_stat_raw' => undef,
 				'z_stat_empi' => undef,
+				'snps' => undef,
 				};
 		
 		# this section reduces the gene sets to sets of genes of non-overlapping recombination intervals
@@ -369,7 +381,10 @@ foreach my $gene_set_file (@$gmt){
 		}
 		$p->{N_in} = scalar @{$p->{'genes'}} if (not defined $p->{N_in});
 		if (scalar @{ $p->{'stats'} } == 0){  @{ $p->{'stats'} } = map {$gene_data{$_}->{stat}} @{$p->{'genes'}};  }
-		map { $genes_in_paths{$_} = $gene_data{$_}->{stat}; } @{ $p->{genes} };
+		map { 
+			$genes_in_paths{$_} = $gene_data{$_}->{stat}; 
+			push @{ $gene_2_paths_map{$_} }, $p->{name};
+		} @{ $p->{genes} };
 		map { $genes_in_paths{$_} = $gene_data{$_}->{stat}; } @{ $p->{"gene_recomb_inter_redundant"} };
 		push @pathways, $p;
 	}
@@ -385,100 +400,119 @@ for (my $p = 0; $p < scalar @pathways; $p++){
 if (defined $ref_list){
 	foreach my $gn (keys %ref_genes){
 		if (exists $gene_data{lc($gn)}->{stat}){
-			$genes_in_paths{$gn} = $gene_data{lc($gn)}->{stat};
+			$genes_in_paths{lc($gn)} = $gene_data{lc($gn)}->{stat};
 		}
 	}
 }
 if (scalar @pathways == 1){
 	foreach my $gn (keys %gene_data){
 		if (exists $gene_data{lc($gn)}->{stat}){
-			$genes_in_paths{$gn} = $gene_data{lc($gn)}->{stat};
+			$genes_in_paths{lc($gn)} = $gene_data{lc($gn)}->{stat};
 		}
 	}
 }
 
-print scalar localtime(), "\t", "   '-> [ " . scalar @pathways . " ] gene-sets will be analysed\n";
+print_OUT("   '-> [ " . scalar @pathways . " ] gene-sets will be analysed",$LOG);
 
-# mean of all stats across the genome
-my $background_values;
-if (defined $all_are_background) {
-	my @values = ();
-	foreach my $gn (keys %gene_data){
-		push @values, $gene_data{$gn}->{stat};
-	}
-	$background_values = pdl @values;
-} else {
-	$background_values = pdl values %genes_in_paths;
-}
-print scalar localtime(), "\t", "   '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null\n";
-$background_values->inplace->setvaltobad( "inf" );
-$background_values->inplace->setvaltobad( "-inf" );
-my $mu = $background_values->average;
-# sd of all stats across the genome
-my $sd = $background_values->stdv;
 
-# if permutation are performed store null distribution in here
-my %null_size_dist = ();
 
-print scalar localtime(), "\t", "Writing output to [ $out ]\n";
-if (defined $append){
-	open (OUT,">>$out") or die $!;
-}else {
-	open (OUT,">$out") or die $!;
-	if (defined $perm){
-		print OUT join "\t",("name","raw_p","raw_z","empi_p:$set_stat","empi_z:$set_stat","mean_set","mean_null","sd_null","N_in","N_all","desc");
-		
-	} else {
-		print OUT join "\t",("name","raw_p","raw_z","N_in","N_all","desc");	
+# Now lets going to read the affy id to rsid mapping. This is used to keep all ids in the
+# same nomenclature
+my %affy_id = ();
+if ( defined $affy_to_rsid ) { # if conversion file is defined
+	print_OUT("Reading AFFY to rsID mapping from [ $affy_to_rsid ]",$LOG);
+	open( AFFY, $affy_to_rsid ) or print_OUT("I can not open [ $affy_to_rsid ]") and exit(1);
+	while (my $affy = <AFFY>){
+		chomp($affy);
+		my @b = split(/\t+/,$affy);
+		$affy_id{$b[0]} = $b[1];
 	}
-	if (defined $add_file_name){
-		print OUT "\tdataset";
-	}
-	print OUT "\n";
+	close(AFFY);
 }
 
-print_OUT("Reading SNPs included in analysis\n");
+print_OUT("Reading SNPs included in analysis",$LOG);
 my %snps_covered = ();
 foreach my $file (@$snp_assoc){
-	open (ASSOC,$file) or print_OUT("Cannot open [ $file ]") and die$!;
+	open (ASSOC,$file) or print_OUT("Cannot open [ $file ]") and die $!;
 	while(my $line = <ASSOC>){
 		my @d = split(/[\t+\s+]/,$line);
-		$snp_covered{$d[0]} = "";
+		$snps_covered{$d[0]} = "";
 	}
 	close(ASSOC);
 }
-print_OUT("" . scalar (keys %snps_covered) . " SNP were to calculated gene p-values.");
+print_OUT("\t   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
 
-print_OUT("Loading SNP-2-Gene mapping");
+
+
+print_OUT("Checking genotypes on [ $bfile.bed ]",$LOG);
+# open genotype file
+my $bed = new IO::File;
+$bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]") and exit(1);
+binmode($bed); # set file type to binary
+my $plink_bfile_signature = "";
+read $bed, $plink_bfile_signature, 3;
+if (unpack("B24",$plink_bfile_signature) ne '011011000001101100000001'){
+    print_OUT("Binary file is not in SNP-major format, please check you files",$LOG);
+    exit(1);
+} else { 
+	print_OUT("Binary file is on SNP-major format",$LOG); 
+}
+
+
+
+my @bim = ();
+my @fam = ();
+if (defined $bfile) {
+	# read the bim file with snp information and fam file with sample information
+	@bim = @{ read_bim("$bfile.bim",$affy_to_rsid,\%affy_id) };
+	@fam = @{ read_fam("$bfile.fam") };
+	print_OUT("[ " . scalar @bim .  " ] SNPs and [ " . scalar @fam .  " ] samples in genotype file",$LOG);
+}
+my %bim_ids = ();
+my $index = 0;
+map {
+	$bim_ids{$_->{snp_id}} = $index;
+	$index++;
+} @bim;
+# calculate how many bytes are needed  to encode a SNP
+# each byte has 8 bits with information for 4 genotypes
+my $N_bytes_to_encode_snp = (scalar @fam)/4; # four genotypes per byte
+# if not exact round it up
+if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
+
+
+print_OUT("Loading SNP-2-Gene mapping",$LOG);
+
 for (my $i = 0; $i < scalar @$snpmap; $i++){
 	if ($snpmap->[$i] =~ m/\#/){
-		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes.");
-	push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
-	splice(@$snpmap,$i,1);
+		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes",$LOG);
+		push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
+		splice(@$snpmap,$i,1);
 	}
 }
-# READ SNP-2-GENE MAPPING
-my %snp_to_gene = ();
-my %ids_map = ();
+
 foreach my $snp_gene_mapping_file (@$snpmap){
 	if (not -e $snp_gene_mapping_file){
 		print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
 		next;
 	}
-	open( MAP, $snp_gene_mapping_file ) or print_OUT("Can not open [ $snp_gene_mapping_file ] file",$LOG) and exit(1);
-	print_OUT("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+	open( MAP, $snp_gene_mapping_file ) or print_OUT ("Can not open [ $snp_gene_mapping_file ] file") and exit(1);
+	print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
 	while ( my $read = <MAP> ) {
 		chomp($read);
 		# the line is separate in gene info and snps. the section are separated by a tab.
 		my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
 		#check if gene was in the list of genes i want to analyze
-		unless ( defined $all_genes ) {
-			next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
-		}
-		if (defined $analysis_chr){
-			next if ($analysis_chr ne $chr);
-		}
-		
+		my $gene_id = undef;
+		if ( exists $gene_data{lc($hugo)}){
+			$gene_id= lc($hugo);
+		} elsif (exists $gene_data{lc($ensembl)}){
+			$gene_id= lc($ensembl);
+		} else {
+			next;
+		}		
+		next unless (exists $genes_in_paths{lc($hugo)} or  exists $genes_in_paths{lc($ensembl)});
+
 		my @first_snp_n_fields =  split(/\:/,$m[0]);
 		if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 		
@@ -492,26 +526,6 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 		}
 		
 		next if (scalar @mapped_snps == 0);
-		# create a pseudo-hash with the gene info
-		$gene{$ensembl} = {
-			'hugo'      => $hugo,
-			'ensembl'   => $ensembl,	
-			'chr'       => $chr,
-			'start'     => $start,
-			'end'       => $end,
-			'gene_type' => $gene_type,
-			'snps'      => [],
-			'minp'      => -9,
-			'genotypes' => null,
-			'geno_mat_rows' => [],
-			'cor' => null,
-			'weights' => null,
-			'pvalues' => [],
-			'effect_size' => undef,
-			'effect_size_se' => undef,
-			'gene_status' => $gene_status,
-			'desc' => $description,
-		};
 		
 		# go over mapped snps and change convert affy ids to rsid.
 		# and make a non-redundant set.
@@ -523,54 +537,135 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 				}
 			}
 			# exclude snps not in the association file nor in the bim file
-			next unless ( exists $assoc_data{$s} );
-			next unless ( exists $bim_ids{$s});
+			next unless ( exists $snps_covered{$s} );
+			next unless ( exists $bim_ids{$s} );
 			$nr_snps{$s} = "";
 		}
 		@mapped_snps = keys %nr_snps;
-		
-		# go over the snps mapped to the gene and check if they are in the map
-		# and association files. If so, store the min p-value for the gene.
-		# if any of the snps is in the files the remove the gene from the analysis.
-		foreach my $s (@mapped_snps) {
-			if (defined $v ){ print_OUT("Mapping [ $s ] to [ $ensembl ]",$LOG);}
-			next if ( grep $_ eq $s, @{ $gene{$ensembl}->{snps} } );
-			push @{ $snp_to_gene{$s} }, $ensembl;
-			push @{ $gene{$ensembl}->{snps} }, $s;	
-			if ( $gene{$ensembl}->{minp} == -9) {
-				$gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-			} elsif ( $assoc_data{$s}->{pvalue} < $gene{$ensembl}->{minp} ) {
-				$gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-			}
+		if ( scalar @mapped_snps == 0 ){
+			delete($gene_data{$gene_id});
+			next;
 		}
-		# remove gene if none of its snps is in the analysis.
-		if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { 
-			delete( $gene{$ensembl} ); 
-		} else { 
-			if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs",$LOG); }
-			$ids_map{$hugo} = $ensembl;	   
-		}
-		
+		$gene_data{$gene_id}->{snps} = [@mapped_snps];
 	}
 	close(MAP);
 }
-print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes read from SNP-2-Gene Mapping files",$LOG);
-print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed",$LOG);
 
-foreach my $gn (keys %gene_data){
+print_OUT("Reading genotypes for genes",$LOG);
+
+my %snp_genotype_stack = ();
+my $i = 0;
+foreach my $p (@pathways) {
+	report_advance($i++,$report,"Gene-Sets Genotypes",$LOG);
+	if ( scalar @{ $p->{genes} } < $min_size ) {
+		$p->{N_in} = -1;
+		next;
+	}
+	my @new_genes = ();
+	foreach my $gn ( @{$p->{ genes } } ){
+		next if ( not exists $gene_data{$gn} );
+		next if ( not defined $gene_data{$gn}->{snps} );
+		# this will store the genotypes
+		my $matrix = [];
+		my @gn_snps_with_genotypes = ();
+		foreach my $snp ( @{ $gene_data{$gn}->{snps} } ){
+			if (exists $snp_genotype_stack{$snp}) {
+				push @{ $matrix }, $snp_genotype_stack{$snp};
+				push @gn_snps_with_genotypes, $snp;
+			} else { 
+				# because we know the index of the SNP in the genotype file we know on which byte its information starts
+				my $snp_byte_start = $N_bytes_to_encode_snp*$bim_ids{$snp};
+				# here i extract the actual genotypes
+				my @snp_genotypes = @{ extract_binary_genotypes(scalar @fam,$N_bytes_to_encode_snp,$snp_byte_start,$bed) };
+				# store the genotypes.
+				# if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
+				# here i extract the number of genotypes corresponding to the number of samples
+				
+				my $maf = get_maf([@snp_genotypes[0..scalar @fam - 1]] ); # check the maf of the SNP
+				next if ($maf == 0 or $maf ==1);  # go to next if it is monomorphic
+				push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
+				push @gn_snps_with_genotypes, $snp;
+				$snp_genotype_stack{$snp} = [@snp_genotypes[0..scalar @fam - 1]];			
+			}
+		}
+		next if (scalar @gn_snps_with_genotypes == 0);
+		$gene_data{$gn}->{snps} = [@gn_snps_with_genotypes];
+		$gene_data{$gn}->{genotypes} = pdl $matrix;
+		push @new_genes, $gn;
+	}
 	
-	print "$gn\n";
-	getc;
+	if (scalar @new_genes < $min_size){
+		$p->{N_in} = -1;
+		next;
+	}
+	
+	$p->{genes} = [ @new_genes ];
+	my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
+	$p->{stats} = [ @stats ];
+	$p->{N_in} = scalar @{ $p->{genes} };
+	$p->{gene_cor_mat} = calculate_gene_corr_mat($p->{genes},\%gene_data);	
+
+	foreach my $gn (  @{ $p->{genes} } ){
+		if (scalar @{ $gene_2_paths_map{$gn} } == 1){
+			delete($gene_data{$gn}->{genotypes});
+		} else {
+			splice( @{ $gene_2_paths_map{$gn} },0,1);
+		}
+	}
+}
+%snp_genotype_stack = ();
+
+print_OUT("  '->[ " . scalar (keys %gene_data) . " ] Genes read from SNP-2-Gene Mapping files with genotpe data",$LOG);
+
+# mean of all stats across the genome
+my $background_values;
+if (defined $all_are_background) {
+	my @values = ();
+	foreach my $gn (keys %gene_data){
+		push @values, $gene_data{$gn}->{stat};
+	}
+	$background_values = pdl @values;
+} else {
+	$background_values = pdl values %genes_in_paths;
+}
+print_OUT("   '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
+$background_values->inplace->setvaltobad( "inf" );
+$background_values->inplace->setvaltobad( "-inf" );
+my $mu = $background_values->average;
+# sd of all stats across the genome
+my $sd = $background_values->stdv;
+
+# if permutation are performed store null distribution in here
+my %null_size_dist = ();
+
+print_OUT("Writing output to [ $out ]",$LOG);
+if (defined $append){
+	open (OUT,">>$out") or die $!;
+} else {
+	open (OUT,">$out") or die $!;
+	print OUT join "\t",("name","raw_p","raw_z",$LOG);
+	
+	if (defined $bfile and defined $snpmap and defined $snp_assoc){
+		print OUT "\tstouffer_z_p\tstouffer_z\tstouffer_z_var";
+	}
+	if (defined $perm){
+		print OUT ("\tempi_p:$set_stat\tempi_z:$set_stat\tmean_set\tmean_null\tsd_null");
+	} 
+	print OUT ("\tN_in\tN_all\tdesc");
+	if (defined $add_file_name){
+		print OUT "\tdataset";
+	}
+	print OUT "\n";
 }
 
 my $c = 0;
-foreach my $p (@pathways) {
+while (my $p = shift @pathways) {
 	report_advance($c,$report,"Gene-Sets");
 	$c++;
+	next if ( $p->{N_in} < $min_size);
 	my $m = $p->{N_in};
 	my $Sm = mean( $p->{stats} );
 	my $z_score = ( ( $Sm - $mu ) * (sqrt($m) ) ) / $sd;
-	
 	$p->{z_stat_raw} = $z_score;
 	
 	if ( $z_score == -0 ) {
@@ -578,6 +673,14 @@ foreach my $p (@pathways) {
 	} else {
 		printf OUT ("$p->{name}\t%.3e\t%.3f", 1 - gsl_cdf_ugaussian_P($z_score),$z_score);
 	}
+
+	if (defined $bfile and defined $snpmap and defined $snp_assoc){
+		my $z = pdl $p->{stats};
+		my $var = dsum($p->{gene_cor_mat});
+		$p->{z_stouffer} = dsum($z)/sqrt($var);
+		printf OUT ("\t%.3e\t%.3f\t%.3e", gsl_cdf_ugaussian_P(-1*$p->{z_stouffer}),$p->{z_stouffer},$var);
+	}
+	
 	if (defined $perm){
 		$Sm = &$network_stat( $p->{stats} );
 		if (defined $recomb_intervals){
@@ -628,13 +731,13 @@ if (defined $cgnets or defined $cgnets_all){
 	my @candidate_paths = ();
 	# If -cgnets_all then all gene in gene-sets and all gene-sets will be analysed.
 	if (defined $cgnets_all){ @candidate_genes = keys %genes_in_paths; } 
-	print scalar localtime(), "\t", "   '-> [ " . scalar @candidate_genes . " ] CGNets seed genes\n";
+	print_OUT("   '-> [ " . scalar @candidate_genes . " ] CGNets seed genes",$LOG);
 	my $index = 0;
 	my %gene_index = ();
 	my $p_index = 0; # this is the index of the gene-set in the @candidate_paths array
 	my $g_index = 0; # this will be the index of the gene dimension in the $p_cor piddle matrix.
 	my %genes_paths_map = ();
-	print scalar localtime(), "\t", "Cheking overlap between CGNets seeds and gene-sets\n";
+	print_OUT("Cheking overlap between CGNets seeds and gene-sets",$LOG);
 	# generate and index for the gene-sets and the genes.
 	# the index will be used to fill up the correlation matrix among gene-sets
 	foreach my $p (@pathways){
@@ -661,19 +764,19 @@ if (defined $cgnets or defined $cgnets_all){
 		}
 	}
 
-	print scalar localtime(), "\t", "   '-> [ " . scalar @candidate_paths . " ] gene-sets with CGNets seed genes\n";
+	print_OUT("   '-> [ " . scalar @candidate_paths . " ] gene-sets with CGNets seed genes",$LOG);
 	# check if there are CGNets seed without a gene-set a report it
 	my @candidates_no_genesets = ();
 	map {  if (not exists $genes_paths_map{$_}){ push @candidates_no_genesets, $_; }  } @candidate_genes;
 	if (scalar @candidates_no_genesets != 0){
-		print scalar localtime(), "\t", "PLEASE NOTE that [ " . scalar @candidates_no_genesets . " ] CGNets seed have not been mapped to gene-sets\n";
-		print scalar localtime(), "\t", "   '-> Writting their ids to [ $out.cgnets.without_genesets ]\n";
+		print_OUT("PLEASE NOTE that [ " . scalar @candidates_no_genesets . " ] CGNets seed have not been mapped to gene-sets",$LOG);
+		print_OUT("   '-> Writting their ids to [ $out.cgnets.without_genesets ]",$LOG);
 		open (NOMAPPED, ">$out.cgnets.without_genesets") or die $!;
 		print NOMAPPED join "\n",@candidates_no_genesets;
 		print NOMAPPED "\n";
 		close(NOMAPPED);
 		if (scalar @candidates_no_genesets == scalar @candidate_genes){
-			print scalar localtime(), "\t", "Hello!! There are no CGNets seed left for analysis. Bye now.\n";
+			print_OUT("Hello!! There are no CGNets seed left for analysis. Bye now.",$LOG);
 			exit(1);
 		}
 	}
@@ -690,8 +793,8 @@ if (defined $cgnets or defined $cgnets_all){
 			}
 			
 		}
-		print scalar localtime(), "\t", "Calculating effective number of gene-set for experiment wise correction\n";
-		print scalar localtime(), "\t", "Calculating correlation matrix among gene-sets. This may take a while, go for a coffe is using -cgnets_all\n";
+		print_OUT("Calculating effective number of gene-set for experiment wise correction",$LOG);
+		print_OUT("Calculating correlation matrix among gene-sets. This may take a while, go for a coffe is using -cgnets_all",$LOG);
 		# this is to ensure piddle of > than 1 Gb can be generated
 #		if (scalar @candidate_paths > 1_000){
 #			$p_cor = float $PDL::BIGPDL=zeroes( scalar @candidate_paths, scalar @candidate_paths);
@@ -702,9 +805,9 @@ if (defined $cgnets or defined $cgnets_all){
 		$p_cor = $path_gene_content->transpose->corr_table;
 		# calculate effective number of gene-sets for the experiment wise correction
 		$overall_cgnet_Meff = number_effective_tests($p_cor);
-		printf (scalar localtime() . "\t   '-> [ %.2f ] effective number of gene-sets\n",$overall_cgnet_Meff );
+		print_OUT("\t   '-> [ $overall_cgnet_Meff ] effective number of gene-sets",$LOG);
 	} else {
-		print scalar localtime(), "\t", "Will use the number of pathway as number of tests. Be aware this is a conservative estimate\n";
+		print_OUT("Will use the number of pathway as number of tests. Be aware this is a conservative estimate",$LOG);
 	}
 	
 	my $counter  = 0;
@@ -753,7 +856,7 @@ if (defined $cgnets or defined $cgnets_all){
 					}
 				}
 				if (not defined $seed_stat_for_gene_set ) {
-					print "I could not match the interval statistics for [ $seed ]\n";
+					print_OUT("I could not match the interval statistics for [ $seed ]",$LOG);
 					exit;
 				}
 				push @{ $Zs }, $_->{z_stat_raw};
@@ -826,25 +929,7 @@ if (defined $cgnets or defined $cgnets_all){
 					$sidak_experiment_wise,
 					$log10_BF->max,
 					$log10_overall_BF,
-					$overall_cgnet_Meff);
-			
-			#print 	"$seed\nP(G+): ", $P_Gplus,"\n",
-			#	"P(G-): ", $P_Gminus,"\n",
-			#	"P(N_i|G+)",$P_ni_Gplus,"\n",
-			#	"P(N_i|G-)",$P_ni_Gminus,"\n",
-			#	"P(N_i|G+)P(G+)",$P_ni_Gplus*$P_Gplus,"\n",
-			#	"P(N_i|G-)P(G-)",$P_ni_Gminus*$P_Gminus,"\n",
-			#	"[ P(Ni|G-)P(G-) + P(Ni|G+)P(G+)] : ",double ($P_ni_Gplus*$P_Gplus) + double($P_ni_Gminus*$P_Gminus ),"\n",
-			#	"log10 P(G|N_i)",$log10_P_G_Ni,"\n",
-			#	"log10 BF P(G|N_i)/P(G): ", $log10_BF,"\n",
-			#	#"P(Ni): ",$P_Ni,"\n",
-			#	"log10 P(G|N): ",$log10_P_G_N,"\n",
-			#	"log10 BF P(G|N)/P(G): ", $log10_overall_BF,"\n",
-			#	#"log10 P(N|G) ",$log10_P_N_G,"\n",
-			#	#"log10 P(N) ",$log10_P_N,"\n";
-			#
-
-			
+					$overall_cgnet_Meff);		
 		} elsif (scalar @{ $genes_paths_map{$seed}} == 1){
 			my $seed_stat_for_gene_set = undef;
 			if (not defined $best_x_interval){
@@ -874,73 +959,69 @@ if (defined $cgnets or defined $cgnets_all){
 			my $p = 1-gsl_cdf_ugaussian_P($cgnet_z);
 			my $sidak_experiment_wise = 1 - (1 - $p)**$overall_cgnet_Meff;
 			$seed = uc($seed);
-			printf OUTCGNETS ("$seed\t%.3f\t1\t1\t$candidate_paths[$seed_paths_index->list]->{name}\t%.2e\t%.2e\t%.2e\t$candidate_paths[$seed_paths_index->list]->{name}\t%.3f\t%.3f\t%.3f\t$candidate_paths[$seed_paths_index->list]->{name}\n", $cgnet_z,$p,$p,$sidak_experiment_wise,$log10_BF,$log10_BF,$overall_cgnet_Meff);
+			my $sidak_experiment_wise10_BF10_BF = "FOO";
+			printf OUTCGNETS ("$seed\t%.3f\t1\t1\t$candidate_paths[$seed_paths_index->list]->{name}\t%.2e\t%.2e\t%.2e\t$candidate_paths[$seed_paths_index->list]->{name}\t%.3f\t%.3f\t%.3f\t$candidate_paths[$seed_paths_index->list]->{name}\n", $cgnet_z,$p,$p,$sidak_experiment_wise10_BF10_BF,$overall_cgnet_Meff);
 		} elsif (scalar @{ $genes_paths_map{$seed}} == 0){ next; }
 	}
 
 
 }
 
-print scalar localtime(), "\t", "Well Done\n";
+print_OUT("Well Done",$LOG);
 exit;
 
-
-# this subroutine calculate the number of effective test by the Galwey and Gao method.
-sub number_effective_tests {
-   my $mat = shift;
-   # calculate the eigen value of the correlation matrix
-   my $eigens = eigens $mat;
-   # normalize the values
-   my $eigens_norm =  pdl sort { $b <=> $a } list ($eigens/(sumover $eigens) );
-   # calculate number of effective test per Gao et al Gao, X., Becker, L. C., Becker, D. M., Starmer, J. D. & Province, M. A. Avoiding the high Bonferroni penalty in genome-wide association studies. Genet. Epidemiol. (2009).
-   # the methos simply count how many eigen values are needed to explain 99.5 % of the variance
-   my $simpleM = 0;
-   for( $simpleM = 0; $simpleM < scalar list $eigens_norm; $simpleM++){
-      my $sum = sumover $eigens_norm->slice("0:$simpleM");
-      if ($sum >= 0.995){
-         $simpleM++;
-         last;
-      }
-   }
-   # calculate number of effective test by Galwey, N. W. A new measure of the effective number of tests, a practical tool for comparing families of non-independent significance tests. Genet. Epidemiol. (2009).
-   # this method calculate the square of sum of the square-root of the eigen values divided by the sum.
-   my $numerator = 0;
-   my $denominator = 0;
-   foreach my $e (list $eigens) {
-	  if ($e > 0){
-			$numerator += sqrt($e);
-			$denominator += $e;
-	  }
-   }
-   my $Meff_galwey = ($numerator**2)/$denominator;
-   return($simpleM,$Meff_galwey);
+sub print_OUT {
+	my $string = shift;
+	my @file_handles = @_; 	
+	print scalar localtime(), "\t$string\n";
+	unless (scalar @file_handles == 0){
+		foreach my $fh (@file_handles){
+			print $fh scalar localtime(), "\t$string\n";
+		}
+	}
 }
 
-# this subroutine calculate the number of effective test by the Galwey and Gao method.
-sub get_makambi_chi_square_and_df {
-  my $cor = shift; # a pdl matrix with the varoable correlations
-  my $w = shift; # a pdl vector with the weights;
-  $w = $w*abs($cor); # multiply the weights by the correaltions
-  my @dims = $w->dims();
-  $w = pdl map { $w->(,$_)->flat->sum/$w->sum; } 0 .. $dims[1] - 1; # sum the rows divided by sum of the weights used
-  if ($w->min == 0){ $w += $w->(which($w == 0))->min/$w->length; } # make sure NO weights equal 0
-  $w /= $w->sum; # make sure weights sum 1
 
-  my $pvalues = shift; # a pdl vector with the p-values to be combined
-  # calculate the correlation matrix before the applying the weights
-  # I have change this calculation following the results of the paper of Kost et al. this should improve the approximation of the test statistics
-  # Kost, J. T. & McDermott, M. P. Combining dependent p-values. Statistics & Probability Letters 2002; 60: 183-190.
-  # my $COR_MAT = (3.25*abs($cor) + 0.75*(abs($cor)**2));
-  my $COR_MAT = (3.263*abs($cor) + 0.710*(abs($cor)**2) + 0.027*(abs($cor)**3)); 
-  my $second = $COR_MAT*$w*($w->transpose); # apply the weights 
-  ($second->diagonal(0,1)) .= 0; # set the diagonal to 0
-  my $varMf_m = 4*sumover($w**2) + $second->flat->sumover; # calculate the variance of the test statistics
-  my $df = 8/$varMf_m; # the degrees of freedom of the test statistic
-  my $chi_stat = sumover(-2 * $pvalues->log * $w); # and the chi-square for the combine probability
-  $chi_stat = ( $chi_stat/2 ) * $df;
-  return ($chi_stat,$df);
+sub calculate_gene_corr_mat {
+	use CovMatrix;
+	my $genes = shift;
+	my $gene_data = shift;
+	my $corr = stretcher(ones scalar @$genes);
+	
+	my @mats = ();
+	my @gene_index = ();
+	my $gene_counter = 0;
+	foreach my $gn ( @$genes ) {
+		push @mats, $gene_data->{$gn}->{genotypes};	
+		my $indexes = $gene_counter * ones $gene_data->{$gn}->{genotypes}->getdim(1);
+		push @gene_index, $indexes;
+		$gene_counter++;
+	}
+	my $G = splice(@mats,0,1);
+	$G = $G->glue(1,@mats);
+	my $snp_corr = cov_shrink($G->transpose);
+	my $IDX = splice(@gene_index,0,1);
+	$IDX = $IDX->glue(0,@gene_index);
+	my $n_index = $IDX->uniq->nelem;
+	my $var = [];#zeroes $n_index;
+	for (my $i = 0; $i < $n_index; $i++){
+		my $idx_i = which($IDX == $i);
+		push @{ $var }, dsum( $snp_corr->{cor}->($idx_i,$idx_i) );
+	}
+	$var = pdl $var;
+	
+	$corr = zeroes $n_index,$n_index;
+	for (my $i = 0; $i < $n_index; $i++){
+		my $idx_i = which($IDX == $i);
+		for (my $j = $i; $j < $n_index; $j++){
+			my $idx_j = which($IDX == $j);
+			my $c = dsum($snp_corr->{cor}->($idx_i,$idx_j))/(sqrt( $var->($i) * $var->($j) ));
+			set $corr, $i,$j, $c->sclr;
+			set $corr, $j,$i, $c->sclr;
+		}
+	}
+	return($corr);
 }
-
 sub get_makambi_df {
   my $cor = shift; # a pdl matrix with the varoable correlations
   my $w = shift; # a pdl vector with the weights;
@@ -1141,7 +1222,7 @@ sub get_rand_index {
 sub read_recombination_intervals {
         my $file = shift;
 	my $gene_info = shift;
-        print scalar localtime(), "\t", "Reading mapping between genes and recombination intervals from [ $file ]\n";
+        print_OUT("Reading mapping between genes and recombination intervals from [ $file ]",$LOG);
         my %back;
         open (FH,$file) or die $!;
         while (my $line = <FH>){
@@ -1166,9 +1247,20 @@ sub read_recombination_intervals {
 sub report_advance {
 	my ($index,$rep,$tag) = @_;
 	if (( $index/$rep - int($index/$rep)) == 0) {
-		print scalar localtime(), "\t", "     '->Done with [ $index ] $tag\n";
+		print_OUT("     '->Done with [ $index ] $tag",$LOG);
 	}
 }
+
+sub make_file_name_array {
+	my $file = shift;
+	my @back = ();
+	my @body = split(/\#/,$file);
+	for my $chr (1..26){
+		push @back, join "$chr", @body;
+	}
+	return([@back]);
+}
+
 
 __END__
 

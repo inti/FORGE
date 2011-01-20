@@ -13,6 +13,7 @@ use Data::Dumper;
 # Load local functions
 use GWAS_IO;
 use GWAS_STATS;
+use CovMatrix;
 
 our (	$help, $man, $gmt, $pval,
 	$perm, $out, $max_size, 
@@ -440,7 +441,7 @@ foreach my $file (@$snp_assoc){
 	}
 	close(ASSOC);
 }
-print_OUT("\t   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
+print_OUT("   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
 
 
 
@@ -554,6 +555,8 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 print_OUT("Reading genotypes for genes",$LOG);
 
 my %snp_genotype_stack = ();
+my %correlation_stack  = ();
+my %gene_genotype_var  = ();
 my $i = 0;
 foreach my $p (@pathways) {
 	report_advance($i++,$report,"Gene-Sets Genotypes",$LOG);
@@ -565,6 +568,7 @@ foreach my $p (@pathways) {
 	foreach my $gn ( @{$p->{ genes } } ){
 		next if ( not exists $gene_data{$gn} );
 		next if ( not defined $gene_data{$gn}->{snps} );
+		next if ( $gene_data{$gn}->{genotypes}->isempty == 0 );
 		# this will store the genotypes
 		my $matrix = [];
 		my @gn_snps_with_genotypes = ();
@@ -603,8 +607,11 @@ foreach my $p (@pathways) {
 	my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
 	$p->{stats} = [ @stats ];
 	$p->{N_in} = scalar @{ $p->{genes} };
-	$p->{gene_cor_mat} = calculate_gene_corr_mat($p->{genes},\%gene_data);	
-
+	my ($more_corr,$more_var) = "";
+	($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var);	
+	%correlation_stack = ( %correlation_stack, %{$more_corr} );
+	%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
+	
 	foreach my $gn (  @{ $p->{genes} } ){
 		if (scalar @{ $gene_2_paths_map{$gn} } == 1){
 			delete($gene_data{$gn}->{genotypes});
@@ -614,6 +621,9 @@ foreach my $p (@pathways) {
 	}
 }
 %snp_genotype_stack = ();
+%correlation_stack = ();
+%gene_genotype_var  = ();
+
 
 print_OUT("  '->[ " . scalar (keys %gene_data) . " ] Genes read from SNP-2-Gene Mapping files with genotpe data",$LOG);
 
@@ -643,7 +653,7 @@ if (defined $append){
 	open (OUT,">>$out") or die $!;
 } else {
 	open (OUT,">$out") or die $!;
-	print OUT join "\t",("name","raw_p","raw_z",$LOG);
+	print OUT "name\traw_p\traw_z";
 	
 	if (defined $bfile and defined $snpmap and defined $snp_assoc){
 		print OUT "\tstouffer_z_p\tstouffer_z\tstouffer_z_var";
@@ -981,47 +991,76 @@ sub print_OUT {
 	}
 }
 
+sub get_genotype_matrix_var {
+	my $G = shift;
+	my $C = cov_shrink($G->transpose);	
+	my $V = $C->{cor}->dsum();
+	return($V);
+}
 
 sub calculate_gene_corr_mat {
-	use CovMatrix;
-	my $genes = shift;
-	my $gene_data = shift;
-	my $corr = stretcher(ones scalar @$genes);
+	my $genes = shift; # ARRAY ref
+	my $gene_data = shift; # HASH ref
+	my $gene_gene_corr = shift; # HASH reaf
+	my $var = shift; # HASH ref
+
+	my %new_corrs = ();
+	my %new_vars = ();
+
+	# define correlation matrix
+	my $corr = stretcher(ones scalar @$genes); 
 	
-	my @mats = ();
-	my @gene_index = ();
-	my $gene_counter = 0;
-	foreach my $gn ( @$genes ) {
-		push @mats, $gene_data->{$gn}->{genotypes};	
-		my $indexes = $gene_counter * ones $gene_data->{$gn}->{genotypes}->getdim(1);
-		push @gene_index, $indexes;
-		$gene_counter++;
-	}
-	my $G = splice(@mats,0,1);
-	$G = $G->glue(1,@mats);
-	my $snp_corr = cov_shrink($G->transpose);
-	my $IDX = splice(@gene_index,0,1);
-	$IDX = $IDX->glue(0,@gene_index);
-	my $n_index = $IDX->uniq->nelem;
-	my $var = [];#zeroes $n_index;
-	for (my $i = 0; $i < $n_index; $i++){
-		my $idx_i = which($IDX == $i);
-		push @{ $var }, dsum( $snp_corr->{cor}->($idx_i,$idx_i) );
-	}
-	$var = pdl $var;
-	
-	$corr = zeroes $n_index,$n_index;
-	for (my $i = 0; $i < $n_index; $i++){
-		my $idx_i = which($IDX == $i);
-		for (my $j = $i; $j < $n_index; $j++){
-			my $idx_j = which($IDX == $j);
-			my $c = dsum($snp_corr->{cor}->($idx_i,$idx_j))/(sqrt( $var->($i) * $var->($j) ));
-			set $corr, $i,$j, $c->sclr;
-			set $corr, $j,$i, $c->sclr;
+	for (my $i = 0; $i < scalar @$genes; $i++){
+		# get name of gene i
+		my $gn_i = $genes->[$i];
+		# get indexes for its SNPs in the snp correlation matrix
+		my $idx_i = sequence $gene_data->{ $gn_i }->{genotypes}->getdim(1);
+		# get its variance if it has not been calculated already
+		if (not exists $var->{ $gn_i }){
+			$var->{ $gn_i } =  get_genotype_matrix_var($gene_data->{ $gn_i }->{genotypes});
+			$new_vars{ $gn_i } = $var->{ $gn_i };
+		}
+		for (my $j = $i; $j < scalar @$genes; $j++){
+			next if ($j == $i); 
+			# get name of gene j
+			my $gn_j = $genes->[$j];
+
+			# next if this correlation was already calculated
+			next if (exists $gene_gene_corr->{ $gn_i }{ $gn_j });
+			# get indexes for its SNPs in the snp correlation matrix
+			my $idx_j = $gene_data->{ $gn_i }->{genotypes}->getdim(1) + sequence $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+			# get its variance if it has not been calculated already
+			if (not exists $var->{ $gn_j }){
+				$var->{ $gn_j } =  get_genotype_matrix_var($gene_data->{ $gn_j }->{genotypes});
+				$new_vars{ $gn_j } = $var->{ $gn_j };
+			}
+			
+			# combine the genotype data information
+			my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+			for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
+				my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
+
+				for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
+				
+					my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
+					my $c = corr( $genotype_j, $genotype_i );
+					set $r_i_j, $i_snp, $j_snp, $c->sclr;
+				
+				}
+			}
+			my $c_i_j = double $r_i_j->dsum()/sqrt( $var->{ $gn_i } * $var->{ $gn_j }  );
+			set $corr, $i ,$j, $c_i_j;
+			set $corr, $j ,$i, $c_i_j;
+			
+			$new_corrs{$gn_j}{$gn_i} = $new_corrs{$gn_i}{$gn_j} = $c_i_j;
+
 		}
 	}
-	return($corr);
+	return($corr,\%new_corrs,\%new_vars);
 }
+
+
+
 sub get_makambi_df {
   my $cor = shift; # a pdl matrix with the varoable correlations
   my $w = shift; # a pdl vector with the weights;

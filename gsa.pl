@@ -25,7 +25,7 @@ our (	$help, $man, $gmt, $pval,
 	$best_x_interval, $gs_coverage, $interval_merge,
 	$interval_merge_by_chr, $node_similarity, $cgnets_all,
 	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
-	$snpmap, $distance, $affy_to_rsid,
+	$snpmap, $distance, $affy_to_rsid,$gene_set_list
 );
 
 GetOptions(
@@ -40,6 +40,7 @@ GetOptions(
 	'recomb_intervals=s' => \$recomb_intervals,
 	'report=i' => \$report,
 	'gene_sets=s@' => \$gene_sets,
+	'gene_set_list=s'   => \$gene_set_list,
 	'ref_list=s' => \$ref_list,
 	'set_stat=s' => \$set_stat, # stat to calculate over the sub-networks
 	'z_score' => \$input_z,
@@ -203,6 +204,21 @@ if ( defined $recomb_intervals) {
 	%recomb_int = %{ read_recombination_intervals($recomb_intervals,\%gene_data) };
 }
 
+if (defined $gene_sets){
+	print_OUT("Reading Gene-sets from command line [ " . @{$gene_sets} . " ]",$LOG);
+}
+
+if ( defined $gene_set_list ) { # in case user gave a list of genes in the command line
+	print_OUT("Reading Gene-set List from [ $gene_set_list ]",$LOG);
+	# read file with gene list and store gene names.
+	open( GL, $gene_set_list ) or print_OUT("I can not open [ $gene_set_list ]",$LOG) and exit(1);
+	my @gs = <GL>;
+	chomp(@gs);
+	push  @{$gene_sets},@gs; 
+	close(GL);
+} 
+
+
 # stats for all genes in pathways
 my %genes_in_paths = ();
 my %gene_2_paths_map = ();
@@ -213,6 +229,9 @@ foreach my $gene_set_file (@$gmt){
 	open( GMT, $gene_set_file ) or print_OUT("Cannot open [ $gene_set_file ]") and die $!;
 	while ( my $path = <GMT> ) {
 		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
+		if (defined $gene_sets){
+			next unless (grep $_ eq $p_name,@$gene_sets); 
+		}
 		my @p_stats = ();
 		my @gene_with_p = ();
 		my $total = 0;
@@ -638,7 +657,7 @@ if (defined $all_are_background) {
 } else {
 	$background_values = pdl values %genes_in_paths;
 }
-print_OUT("   '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
+print_OUT("  '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
 $background_values->inplace->setvaltobad( "inf" );
 $background_values->inplace->setvaltobad( "-inf" );
 my $mu = $background_values->average;
@@ -1286,7 +1305,7 @@ sub read_recombination_intervals {
 sub report_advance {
 	my ($index,$rep,$tag) = @_;
 	if (( $index/$rep - int($index/$rep)) == 0) {
-		print_OUT("     '->Done with [ $index ] $tag",$LOG);
+		print_OUT("   '->Done with [ $index ] $tag",$LOG);
 	}
 }
 

@@ -450,201 +450,205 @@ if ( defined $affy_to_rsid ) { # if conversion file is defined
 	close(AFFY);
 }
 
-print_OUT("Reading SNPs included in analysis",$LOG);
 my %snps_covered = ();
-foreach my $file (@$snp_assoc){
-	open (ASSOC,$file) or print_OUT("Cannot open [ $file ]") and die $!;
-	while(my $line = <ASSOC>){
-		my @d = split(/[\t+\s+]/,$line);
-		$snps_covered{$d[0]} = "";
+if (defined $snp_assoc){
+	print_OUT("Reading SNPs included in analysis",$LOG);
+	foreach my $file (@$snp_assoc){
+		open (ASSOC,$file) or print_OUT("Cannot open [ $file ]") and die $!;
+		while(my $line = <ASSOC>){
+			my @d = split(/[\t+\s+]/,$line);
+			$snps_covered{$d[0]} = "";
+		}
+		close(ASSOC);
 	}
-	close(ASSOC);
+	print_OUT("   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
 }
-print_OUT("   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
-
-
-
-print_OUT("Checking genotypes on [ $bfile.bed ]",$LOG);
-# open genotype file
-my $bed = new IO::File;
-$bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]") and exit(1);
-binmode($bed); # set file type to binary
-my $plink_bfile_signature = "";
-read $bed, $plink_bfile_signature, 3;
-if (unpack("B24",$plink_bfile_signature) ne '011011000001101100000001'){
-    print_OUT("Binary file is not in SNP-major format, please check you files",$LOG);
-    exit(1);
-} else { 
-	print_OUT("Binary file is on SNP-major format",$LOG); 
-}
-
-
-
+my $N_bytes_to_encode_snp;
+my %bim_ids = ();
 my @bim = ();
 my @fam = ();
-if (defined $bfile) {
+my $bed = new IO::File;
+
+if (defined $bfile){
+	print_OUT("Checking genotypes on [ $bfile.bed ]",$LOG);
+	# open genotype file
+	my $bed = new IO::File;
+	$bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]") and exit(1);
+	binmode($bed); # set file type to binary
+	my $plink_bfile_signature = "";
+	read $bed, $plink_bfile_signature, 3;
+	if (unpack("B24",$plink_bfile_signature) ne '011011000001101100000001'){
+		print_OUT("Binary file is not in SNP-major format, please check you files",$LOG);
+		exit(1);
+	} else { 
+		print_OUT("Binary file is on SNP-major format",$LOG); 
+	}
+
 	# read the bim file with snp information and fam file with sample information
 	@bim = @{ read_bim("$bfile.bim",$affy_to_rsid,\%affy_id) };
 	@fam = @{ read_fam("$bfile.fam") };
 	print_OUT("[ " . scalar @bim .  " ] SNPs and [ " . scalar @fam .  " ] samples in genotype file",$LOG);
-}
-my %bim_ids = ();
-my $index = 0;
-map {
-	$bim_ids{$_->{snp_id}} = $index;
-	$index++;
-} @bim;
-# calculate how many bytes are needed  to encode a SNP
-# each byte has 8 bits with information for 4 genotypes
-my $N_bytes_to_encode_snp = (scalar @fam)/4; # four genotypes per byte
-# if not exact round it up
-if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
-
-
-print_OUT("Loading SNP-2-Gene mapping",$LOG);
-
-for (my $i = 0; $i < scalar @$snpmap; $i++){
-	if ($snpmap->[$i] =~ m/\#/){
-		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes",$LOG);
-		push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
-		splice(@$snpmap,$i,1);
-	}
+	my $index = 0;
+	map {
+		$bim_ids{$_->{snp_id}} = $index;
+		$index++;
+	} @bim;
+	# calculate how many bytes are needed  to encode a SNP
+	# each byte has 8 bits with information for 4 genotypes
+	$N_bytes_to_encode_snp = (scalar @fam)/4; # four genotypes per byte
+	# if not exact round it up
+	if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
 }
 
-foreach my $snp_gene_mapping_file (@$snpmap){
-	if (not -e $snp_gene_mapping_file){
-		print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
-		next;
-	}
-	open( MAP, $snp_gene_mapping_file ) or print_OUT ("Can not open [ $snp_gene_mapping_file ] file") and exit(1);
-	print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
-	while ( my $read = <MAP> ) {
-		chomp($read);
-		# the line is separate in gene info and snps. the section are separated by a tab.
-		my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
-		#check if gene was in the list of genes i want to analyze
-		my $gene_id = undef;
-		if ( exists $gene_data{lc($hugo)}){
-			$gene_id= lc($hugo);
-		} elsif (exists $gene_data{lc($ensembl)}){
-			$gene_id= lc($ensembl);
-		} else {
-			next;
-		}		
-		next unless (exists $genes_in_paths{lc($hugo)} or  exists $genes_in_paths{lc($ensembl)});
-
-		my @first_snp_n_fields =  split(/\:/,$m[0]);
-		if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
-		
-		# get all mapped snps within the distance threshold,
-		my @mapped_snps = ();
-		foreach my $s (@m) {
-			my ($id,$pos,$allele,$strand) = split(/\:/,$s);
-			next if (not defined $id);
-			if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-			elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
+if (defined $snpmap){
+	print_OUT("Loading SNP-2-Gene mapping",$LOG);
+	for (my $i = 0; $i < scalar @$snpmap; $i++){
+		if ($snpmap->[$i] =~ m/\#/){
+			print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes",$LOG);
+			push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
+			splice(@$snpmap,$i,1);
 		}
-		
-		next if (scalar @mapped_snps == 0);
-		
-		# go over mapped snps and change convert affy ids to rsid.
-		# and make a non-redundant set.
-		my %nr_snps = ();
-		foreach my $s (@mapped_snps) {
-			if ( defined $affy_to_rsid ) {
-				if ($s !~ m/^rs/){
-					if (exists $affy_id{$s}){ $s = $affy_id{$s};}
-				}
+	}
+	foreach my $snp_gene_mapping_file (@$snpmap){
+		if (not -e $snp_gene_mapping_file){
+			print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
+			next;
+		}
+		open( MAP, $snp_gene_mapping_file ) or print_OUT ("Can not open [ $snp_gene_mapping_file ] file") and exit(1);
+		print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+		while ( my $read = <MAP> ) {
+			chomp($read);
+			# the line is separate in gene info and snps. the section are separated by a tab.
+			my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
+			#check if gene was in the list of genes i want to analyze
+			my $gene_id = undef;
+			if ( exists $gene_data{lc($hugo)}){
+				$gene_id= lc($hugo);
+			} elsif (exists $gene_data{lc($ensembl)}){
+				$gene_id= lc($ensembl);
+			} else {
+				next;
+			}		
+			next unless (exists $genes_in_paths{lc($hugo)} or  exists $genes_in_paths{lc($ensembl)});
+
+			my @first_snp_n_fields =  split(/\:/,$m[0]);
+			if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
+			
+			# get all mapped snps within the distance threshold,
+			my @mapped_snps = ();
+			foreach my $s (@m) {
+				my ($id,$pos,$allele,$strand) = split(/\:/,$s);
+				next if (not defined $id);
+				if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
+				elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
 			}
-			# exclude snps not in the association file nor in the bim file
-			next unless ( exists $snps_covered{$s} );
-			next unless ( exists $bim_ids{$s} );
-			$nr_snps{$s} = "";
+			
+			next if (scalar @mapped_snps == 0);
+			
+			# go over mapped snps and change convert affy ids to rsid.
+			# and make a non-redundant set.
+			my %nr_snps = ();
+			foreach my $s (@mapped_snps) {
+				if ( defined $affy_to_rsid ) {
+					if ($s !~ m/^rs/){
+						if (exists $affy_id{$s}){ $s = $affy_id{$s};}
+					}
+				}
+				# exclude snps not in the association file nor in the bim file
+				next unless ( exists $snps_covered{$s} );
+				next unless ( exists $bim_ids{$s} );
+				$nr_snps{$s} = "";
+			}
+			@mapped_snps = keys %nr_snps;
+			if ( scalar @mapped_snps == 0 ){
+				delete($gene_data{$gene_id});
+				next;
+			}
+			$gene_data{$gene_id}->{snps} = [@mapped_snps];
 		}
-		@mapped_snps = keys %nr_snps;
-		if ( scalar @mapped_snps == 0 ){
-			delete($gene_data{$gene_id});
-			next;
-		}
-		$gene_data{$gene_id}->{snps} = [@mapped_snps];
+		close(MAP);
 	}
-	close(MAP);
+
+	print_OUT("Reading genotypes for genes",$LOG);
 }
-
-print_OUT("Reading genotypes for genes",$LOG);
-
 my %snp_genotype_stack = ();
 my %correlation_stack  = ();
 my %gene_genotype_var  = ();
 my $i = 0;
-foreach my $p (@pathways) {
-	report_advance($i++,$report,"Gene-Sets Genotypes",$LOG);
-	if ( scalar @{ $p->{genes} } < $min_size ) {
-		$p->{N_in} = -1;
-		next;
-	}
-	my @new_genes = ();
-	foreach my $gn ( @{$p->{ genes } } ){
-		next if ( not exists $gene_data{$gn} );
-		next if ( not defined $gene_data{$gn}->{snps} );
-		next if ( $gene_data{$gn}->{genotypes}->isempty == 0 );
-		# this will store the genotypes
-		my $matrix = [];
-		my @gn_snps_with_genotypes = ();
-		foreach my $snp ( @{ $gene_data{$gn}->{snps} } ){
-			if (exists $snp_genotype_stack{$snp}) {
-				push @{ $matrix }, $snp_genotype_stack{$snp};
-				push @gn_snps_with_genotypes, $snp;
-			} else { 
-				# because we know the index of the SNP in the genotype file we know on which byte its information starts
-				my $snp_byte_start = $N_bytes_to_encode_snp*$bim_ids{$snp};
-				# here i extract the actual genotypes
-				my @snp_genotypes = @{ extract_binary_genotypes(scalar @fam,$N_bytes_to_encode_snp,$snp_byte_start,$bed) };
-				# store the genotypes.
-				# if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
-				# here i extract the number of genotypes corresponding to the number of samples
-				
-				my $maf = get_maf([@snp_genotypes[0..scalar @fam - 1]] ); # check the maf of the SNP
-				next if ($maf == 0 or $maf ==1);  # go to next if it is monomorphic
-				push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
-				push @gn_snps_with_genotypes, $snp;
-				$snp_genotype_stack{$snp} = [@snp_genotypes[0..scalar @fam - 1]];			
+
+if (defined $bfile){
+	foreach my $p (@pathways) {
+		report_advance($i++,$report,"Gene-Sets Genotypes",$LOG);
+		if ( scalar @{ $p->{genes} } < $min_size ) {
+			$p->{N_in} = -1;
+			next;
+		}
+		my @new_genes = ();
+		foreach my $gn ( @{$p->{ genes } } ){
+			next if ( not exists $gene_data{$gn} );
+			next if ( not defined $gene_data{$gn}->{snps} );
+			next if ( $gene_data{$gn}->{genotypes}->isempty == 0 );
+			# this will store the genotypes
+			my $matrix = [];
+			my @gn_snps_with_genotypes = ();
+			foreach my $snp ( @{ $gene_data{$gn}->{snps} } ){
+				if (exists $snp_genotype_stack{$snp}) {
+					push @{ $matrix }, $snp_genotype_stack{$snp};
+					push @gn_snps_with_genotypes, $snp;
+				} else { 
+					# because we know the index of the SNP in the genotype file we know on which byte its information starts
+					my $snp_byte_start = $N_bytes_to_encode_snp*$bim_ids{$snp};
+					# here i extract the actual genotypes
+					my @snp_genotypes = @{ extract_binary_genotypes(scalar @fam,$N_bytes_to_encode_snp,$snp_byte_start,$bed) };
+					# store the genotypes.
+					# if a snp does not use the 8 bits of a byte the rest of the bits are fill with missing values
+					# here i extract the number of genotypes corresponding to the number of samples
+					
+					my $maf = get_maf([@snp_genotypes[0..scalar @fam - 1]] ); # check the maf of the SNP
+					next if ($maf == 0 or $maf ==1);  # go to next if it is monomorphic
+					push @{ $matrix }, [@snp_genotypes[0..scalar @fam - 1]];
+					push @gn_snps_with_genotypes, $snp;
+					$snp_genotype_stack{$snp} = [@snp_genotypes[0..scalar @fam - 1]];			
+				}
+			}
+			next if (scalar @gn_snps_with_genotypes == 0);
+			$gene_data{$gn}->{snps} = [@gn_snps_with_genotypes];
+			$gene_data{$gn}->{genotypes} = pdl $matrix;
+			push @new_genes, $gn;
+		}
+		
+		if (scalar @new_genes < $min_size){
+			$p->{N_in} = -1;
+			next;
+		}
+		
+		$p->{genes} = [ @new_genes ];
+		my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
+		$p->{stats} = [ @stats ];
+		$p->{N_in} = scalar @{ $p->{genes} };
+		my ($more_corr,$more_var) = "";
+		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var);	
+		%correlation_stack = ( %correlation_stack, %{$more_corr} );
+		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
+		
+		foreach my $gn (  @{ $p->{genes} } ){
+			if (scalar @{ $gene_2_paths_map{$gn} } == 1){
+				delete($gene_data{$gn}->{genotypes});
+			} else {
+				splice( @{ $gene_2_paths_map{$gn} },0,1);
 			}
 		}
-		next if (scalar @gn_snps_with_genotypes == 0);
-		$gene_data{$gn}->{snps} = [@gn_snps_with_genotypes];
-		$gene_data{$gn}->{genotypes} = pdl $matrix;
-		push @new_genes, $gn;
 	}
-	
-	if (scalar @new_genes < $min_size){
-		$p->{N_in} = -1;
-		next;
-	}
-	
-	$p->{genes} = [ @new_genes ];
-	my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
-	$p->{stats} = [ @stats ];
-	$p->{N_in} = scalar @{ $p->{genes} };
-	my ($more_corr,$more_var) = "";
-	($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var);	
-	%correlation_stack = ( %correlation_stack, %{$more_corr} );
-	%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
-	
-	foreach my $gn (  @{ $p->{genes} } ){
-		if (scalar @{ $gene_2_paths_map{$gn} } == 1){
-			delete($gene_data{$gn}->{genotypes});
-		} else {
-			splice( @{ $gene_2_paths_map{$gn} },0,1);
-		}
-	}
+	%snp_genotype_stack = ();
+	%correlation_stack = ();
+	%gene_genotype_var  = ();
 }
-%snp_genotype_stack = ();
-%correlation_stack = ();
-%gene_genotype_var  = ();
-
 
 print_OUT("  '->[ " . scalar (keys %gene_data) . " ] Genes read from SNP-2-Gene Mapping files with genotpe data",$LOG);
+if (scalar (keys %gene_data) == 0){
+	print_OUT("No gene-sets to analyze\n");
+	exit(1);
+}
 
 # mean of all stats across the genome
 my $background_values;

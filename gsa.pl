@@ -1049,7 +1049,11 @@ sub calculate_gene_corr_mat {
 			my $gn_j = $genes->[$j];
 
 			# next if this correlation was already calculated
-			next if (exists $gene_gene_corr->{ $gn_i }{ $gn_j });
+			if (exists $gene_gene_corr->{ $gn_i }{ $gn_j }){
+				set $corr, $i ,$j, $gene_gene_corr->{ $gn_i }{ $gn_j };
+				set $corr, $j ,$i, $gene_gene_corr->{ $gn_i }{ $gn_j };
+				next;
+			}
 			# get indexes for its SNPs in the snp correlation matrix
 			my $idx_j = $gene_data->{ $gn_i }->{genotypes}->getdim(1) + sequence $gene_data->{ $gn_j }->{genotypes}->getdim(1);
 			# get its variance if it has not been calculated already

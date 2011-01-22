@@ -25,7 +25,8 @@ our (	$help, $man, $gmt, $pval,
 	$best_x_interval, $gs_coverage, $interval_merge,
 	$interval_merge_by_chr, $node_similarity, $cgnets_all,
 	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
-	$snpmap, $distance, $affy_to_rsid,$gene_set_list
+	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
+	$quick_gene_cor,$gene_cor_max_dist
 );
 
 GetOptions(
@@ -63,6 +64,8 @@ GetOptions(
 	'snpmap|m=s@' => \$snpmap,
 	'distance|d=i' => \$distance,
 	'affy_to_rsid=s' => \$affy_to_rsid,
+	'quick_gene_cor' => \$quick_gene_cor,
+	'gene_cor_max_dist=i' =>$gene_cor_max_dist,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -164,6 +167,9 @@ while (my $line = <PVAL>) {
 					'node_similarity'=> null,
 					'genotypes' => null,
 					'snps' => undef,
+					'chr' => undef,
+					'start' => undef,
+					'end' => undef,
 		};
 	}
 }
@@ -565,6 +571,9 @@ if (defined $snpmap){
 				next;
 			}
 			$gene_data{$gene_id}->{snps} = [@mapped_snps];
+			$gene_data{$gene_id}->{chr} = $chr;
+			$gene_data{$gene_id}->{start} = $start;
+			$gene_data{$gene_id}->{end} = $end;
 		}
 		close(MAP);
 	}
@@ -627,7 +636,7 @@ if (defined $bfile){
 		$p->{stats} = [ @stats ];
 		$p->{N_in} = scalar @{ $p->{genes} };
 		my ($more_corr,$more_var) = "";
-		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var);	
+		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist);	
 		%correlation_stack = ( %correlation_stack, %{$more_corr} );
 		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
 		
@@ -1020,12 +1029,37 @@ sub get_genotype_matrix_var {
 	my $V = $C->{cor}->dsum();
 	return($V);
 }
+sub check_overlap {
+	my $start_uno = shift;
+	my $end_uno = shift;   
+	my $start_dos = shift;   
+	my $end_dos = shift;
+	
+=h
+	              start_1 .......................... end_1
+	 start_2 .......................... end_2
+	 
+=cut
+	
+	return(1) if (($start_uno => $start_dos) and ($start_uno <= $end_dos) );
+	
+=h
+	 start_1 .......................... end_1
+	                  start_2 .......................... end_2	 
+=cut
+	
+	return(1) if (($start_dos => $start_uno) and ($start_dos <= $end_uno) );
+	# else there is no overlap
+	return(0);
+}
 
 sub calculate_gene_corr_mat {
 	my $genes = shift; # ARRAY ref
 	my $gene_data = shift; # HASH ref
 	my $gene_gene_corr = shift; # HASH reaf
 	my $var = shift; # HASH ref
+	my $quick_cor = shift; # 0,1
+	my $max_gene_dist = shift; # integer
 
 	my %new_corrs = ();
 	my %new_vars = ();
@@ -1048,6 +1082,40 @@ sub calculate_gene_corr_mat {
 			# get name of gene j
 			my $gn_j = $genes->[$j];
 
+			# if defined a quick gene-gene correlation the correlation will only be calculate between genes in 
+			# the same chromosome
+			if (defined $quick_cor){
+				# if chromosomes are different set the correlation to 0
+				if ($gene_data->{ $gn_i }->{chr} ne $gene_data->{ $gn_j }->{chr} ) {
+						$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+				} else { # if are in the same chromosome
+					# if user provided a maximum distance to evaluate correlations	
+					if (defined $max_gene_dist){
+						# if they overlap we will need to calculate the correlation
+						# return 0 from check_overlap mean there is no overlap
+						if (check_overlap($gene_data->{ $gn_i }->{start},$gene_data->{ $gn_i }->{end},check_overlap($gene_data->{ $gn_j }->{start},$gene_data->{ $gn_j }->{end}) == 0 ){
+							
+							# check the distance between the gene coordinates
+							if ( $gene_data->{ $gn_i }->{start} > $gene_data->{ $gn_j }->{end}   ){
+								#		                    start_i.....end_i
+								#		start_j.....end_j
+								if ( ($gene_data->{ $gn_i }->{start} - $gene_data->{ $gn_j }->{end}) > $max_gene_dist * 1000 ){
+									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+								}
+							} elsif ( $gene_data->{ $gn_j }->{start} > $gene_data->{ $gn_i }->{end}  ){
+								#		start_i.....end_i
+								#							start_j.....end_j
+								if ( ($gene_data->{ $gn_j }->{start} - $gene_data->{ $gn_i }->{end}) > $max_gene_dist * 1000 ){
+									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+								}
+							}
+							
+						}
+						
+					} 
+				}
+			}
+			
 			# next if this correlation was already calculated
 			if (exists $gene_gene_corr->{ $gn_i }{ $gn_j }){
 				set $corr, $i ,$j, $gene_gene_corr->{ $gn_i }{ $gn_j };

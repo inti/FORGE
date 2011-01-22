@@ -613,7 +613,7 @@ if (defined $bfile){
 			}
 			next if (scalar @gn_snps_with_genotypes == 0);
 			$gene_data{$gn}->{snps} = [@gn_snps_with_genotypes];
-			$gene_data{$gn}->{genotypes} = pdl $matrix;
+			$gene_data{$gn}->{genotypes} = int pdl $matrix;
 			push @new_genes, $gn;
 		}
 		

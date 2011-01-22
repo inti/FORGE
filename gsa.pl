@@ -724,10 +724,10 @@ while (my $p = shift @pathways) {
 		my $Z_STATS = get_fix_and_radom_meta_analysis($z,$se,undef,$p->{gene_cor_mat});
 		
 		printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e", 
-			$Z_STATS->{'B_stouffer_fix'},
+			$Z_STATS->{'B_fix'},
 			$Z_STATS->{'V_fix'},
 			$Z_STATS->{'Z_P_fix'},
-			$Z_STATS->{'B_stouffer_random'},
+			$Z_STATS->{'B_random'},
 			$Z_STATS->{'V_random'},
 			$Z_STATS->{'Z_P_random'},
 			$Z_STATS->{'I2'},

@@ -65,7 +65,7 @@ GetOptions(
 	'distance|d=i' => \$distance,
 	'affy_to_rsid=s' => \$affy_to_rsid,
 	'quick_gene_cor' => \$quick_gene_cor,
-	'gene_cor_max_dist=i' =>$gene_cor_max_dist,
+	'gene_cor_max_dist=i' => \$gene_cor_max_dist,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -99,7 +99,7 @@ if (defined $input_z and not defined $perm){ $perm = 10_000; }
 
 defined $interval_merge or $interval_merge = 0;
 defined $distance or $distance = 20;
-defined $report or $report = 100;
+defined $report or $report = 250;
 defined $max_size or $max_size = 99_999_999; 
 defined $min_size or $min_size = 10;
 print_OUT("Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size",$LOG);
@@ -478,7 +478,6 @@ my $bed = new IO::File;
 if (defined $bfile){
 	print_OUT("Checking genotypes on [ $bfile.bed ]",$LOG);
 	# open genotype file
-	my $bed = new IO::File;
 	$bed->open("<$bfile.bed") or print_OUT("I can not open binary PLINK file [ $bfile ]") and exit(1);
 	binmode($bed); # set file type to binary
 	my $plink_bfile_signature = "";
@@ -586,12 +585,11 @@ my %gene_genotype_var  = ();
 my $i = 0;
 
 if (defined $bfile){
+	my @new_pathways = ();
 	foreach my $p (@pathways) {
 		report_advance($i++,$report,"Gene-Sets Genotypes",$LOG);
-		if ( scalar @{ $p->{genes} } < $min_size ) {
-			$p->{N_in} = -1;
-			next;
-		}
+		next if ( scalar @{ $p->{genes} } < $min_size );
+		
 		my @new_genes = ();
 		foreach my $gn ( @{$p->{ genes } } ){
 			next if ( not exists $gene_data{$gn} );
@@ -622,14 +620,11 @@ if (defined $bfile){
 			}
 			next if (scalar @gn_snps_with_genotypes == 0);
 			$gene_data{$gn}->{snps} = [@gn_snps_with_genotypes];
-			$gene_data{$gn}->{genotypes} = int pdl $matrix;
+			$gene_data{$gn}->{genotypes} = pdl $matrix;
 			push @new_genes, $gn;
 		}
 		
-		if (scalar @new_genes < $min_size){
-			$p->{N_in} = -1;
-			next;
-		}
+		next if (scalar @new_genes < $min_size);
 		
 		$p->{genes} = [ @new_genes ];
 		my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
@@ -640,6 +635,9 @@ if (defined $bfile){
 		%correlation_stack = ( %correlation_stack, %{$more_corr} );
 		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
 		
+		# store the pathway information
+		push @new_pathways, $p;
+		
 		foreach my $gn (  @{ $p->{genes} } ){
 			if (scalar @{ $gene_2_paths_map{$gn} } == 1){
 				delete($gene_data{$gn}->{genotypes});
@@ -648,6 +646,8 @@ if (defined $bfile){
 			}
 		}
 	}
+	@pathways = @new_pathways;
+	
 	%snp_genotype_stack = ();
 	%correlation_stack = ();
 	%gene_genotype_var  = ();
@@ -688,7 +688,7 @@ if (defined $append){
 	print OUT "name\traw_p\traw_z";
 	
 	if (defined $bfile and defined $snpmap and defined $snp_assoc){
-		print OUT "\tstouffer_z_p\tstouffer_z\tstouffer_z_var";
+		print OUT "\tZ_stouffer_fix\tV_fix\tZ_P_fix\tZ_stouffer_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";		
 	}
 	if (defined $perm){
 		print OUT ("\tempi_p:$set_stat\tempi_z:$set_stat\tmean_set\tmean_null\tsd_null");
@@ -700,6 +700,7 @@ if (defined $append){
 	print OUT "\n";
 }
 
+print_OUT("Starting to Analyse the [ " . scalar @pathways . " ] gene-sets",$LOG);
 my $c = 0;
 while (my $p = shift @pathways) {
 	report_advance($c,$report,"Gene-Sets");
@@ -719,8 +720,21 @@ while (my $p = shift @pathways) {
 	if (defined $bfile and defined $snpmap and defined $snp_assoc){
 		my $z = pdl $p->{stats};
 		my $var = dsum($p->{gene_cor_mat});
-		$p->{z_stouffer} = dsum($z)/sqrt($var);
-		printf OUT ("\t%.3e\t%.3f\t%.3e", gsl_cdf_ugaussian_P(-1*$p->{z_stouffer}),$p->{z_stouffer},$var);
+		my $se = $z->nelem * ones $z->nelem;
+		my $Z_STATS = get_fix_and_radom_meta_analysis($z,$se,undef,$p->{gene_cor_mat});
+		
+		printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e", 
+			$Z_STATS->{'B_stouffer_fix'},
+			$Z_STATS->{'V_fix'},
+			$Z_STATS->{'Z_P_fix'},
+			$Z_STATS->{'B_stouffer_random'},
+			$Z_STATS->{'V_random'},
+			$Z_STATS->{'Z_P_random'},
+			$Z_STATS->{'I2'},
+			$Z_STATS->{'Q'},
+			$Z_STATS->{'Q_P'},
+			$Z_STATS->{'tau_squared'},
+		);
 	}
 	
 	if (defined $perm){
@@ -1034,23 +1048,30 @@ sub check_overlap {
 	my $end_uno = shift;   
 	my $start_dos = shift;   
 	my $end_dos = shift;
-	
+	my $back = 0;
+
 =h
 	              start_1 .......................... end_1
 	 start_2 .......................... end_2
 	 
 =cut
-	
-	return(1) if (($start_uno => $start_dos) and ($start_uno <= $end_dos) );
+	if (($start_uno > $start_dos) and ($start_uno < $end_dos) ){$back = 1; }
 	
 =h
 	 start_1 .......................... end_1
 	                  start_2 .......................... end_2	 
 =cut
+	if (($start_dos > $start_uno) and ($start_dos < $end_uno) ){$back = 1; }
 	
-	return(1) if (($start_dos => $start_uno) and ($start_dos <= $end_uno) );
+=h
+	start_1 .......................... end_1
+	start_2 .......................... end_2
+
+=cut
+	if (($start_uno == $start_dos) or ($end_uno == $end_dos) ){$back = 1; }
+	
 	# else there is no overlap
-	return(0);
+	return($back);
 }
 
 sub calculate_gene_corr_mat {
@@ -1084,16 +1105,17 @@ sub calculate_gene_corr_mat {
 
 			# if defined a quick gene-gene correlation the correlation will only be calculate between genes in 
 			# the same chromosome
-			if (defined $quick_cor){
+			if (not exists $gene_gene_corr->{ $gn_i }{ $gn_j } and defined $quick_cor){
 				# if chromosomes are different set the correlation to 0
 				if ($gene_data->{ $gn_i }->{chr} ne $gene_data->{ $gn_j }->{chr} ) {
-						$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+					$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+					$new_corrs{$gn_j}{$gn_i} = 0;
 				} else { # if are in the same chromosome
 					# if user provided a maximum distance to evaluate correlations	
 					if (defined $max_gene_dist){
 						# if they overlap we will need to calculate the correlation
 						# return 0 from check_overlap mean there is no overlap
-						if (check_overlap($gene_data->{ $gn_i }->{start},$gene_data->{ $gn_i }->{end},check_overlap($gene_data->{ $gn_j }->{start},$gene_data->{ $gn_j }->{end}) == 0 ){
+						if (check_overlap($gene_data->{ $gn_i }->{start},$gene_data->{ $gn_i }->{end},check_overlap($gene_data->{ $gn_j }->{start},$gene_data->{ $gn_j }->{end}) == 0 )){
 							
 							# check the distance between the gene coordinates
 							if ( $gene_data->{ $gn_i }->{start} > $gene_data->{ $gn_j }->{end}   ){
@@ -1101,12 +1123,14 @@ sub calculate_gene_corr_mat {
 								#		start_j.....end_j
 								if ( ($gene_data->{ $gn_i }->{start} - $gene_data->{ $gn_j }->{end}) > $max_gene_dist * 1000 ){
 									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+									$new_corrs{$gn_j}{$gn_i} = 0;
 								}
 							} elsif ( $gene_data->{ $gn_j }->{start} > $gene_data->{ $gn_i }->{end}  ){
 								#		start_i.....end_i
 								#							start_j.....end_j
 								if ( ($gene_data->{ $gn_j }->{start} - $gene_data->{ $gn_i }->{end}) > $max_gene_dist * 1000 ){
 									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+									$new_corrs{$gn_j}{$gn_i} = 0;
 								}
 							}
 							
@@ -1148,7 +1172,6 @@ sub calculate_gene_corr_mat {
 			set $corr, $j ,$i, $c_i_j;
 			
 			$new_corrs{$gn_j}{$gn_i} = $new_corrs{$gn_i}{$gn_j} = $c_i_j;
-
 		}
 	}
 	return($corr,\%new_corrs,\%new_vars);

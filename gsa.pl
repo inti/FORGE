@@ -26,7 +26,7 @@ our (	$help, $man, $gmt, $pval,
 	$interval_merge_by_chr, $node_similarity, $cgnets_all,
 	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
-	$quick_gene_cor,$gene_cor_max_dist
+	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list
 );
 
 GetOptions(
@@ -66,6 +66,7 @@ GetOptions(
 	'affy_to_rsid=s' => \$affy_to_rsid,
 	'quick_gene_cor' => \$quick_gene_cor,
 	'gene_cor_max_dist=i' => \$gene_cor_max_dist,
+	'print_ref_list' => \$print_ref_list,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -157,8 +158,11 @@ while (my $line = <PVAL>) {
 	}
 	$z = eval($z);
 	if ( exists $gene_data{$gn} ) {
-		if ( $gene_data{$gn}->{stat} < $z ) { $gene_data{$gn}->{stat} = $z; }
-		$gene_data{$gn}->{pvalue} = $p;
+		if ( $gene_data{$gn}->{stat} > $z ) { 
+			$gene_data{$gn}->{stat} = $z; 
+			$gene_data{$gn}->{pvalue} = $p;
+		}
+		
 	} else { 
 		$gene_data{$gn} = {
 					'stat' => $z,
@@ -406,7 +410,9 @@ foreach my $gene_set_file (@$gmt){
 			$p->{N_in} = scalar @{$p->{'genes'}}; #+  scalar @{$p->{"gene_recomb_inter_redundant"}};
 		}
 		$p->{N_in} = scalar @{$p->{'genes'}} if (not defined $p->{N_in});
-		if (scalar @{ $p->{'stats'} } == 0){  @{ $p->{'stats'} } = map {$gene_data{$_}->{stat}} @{$p->{'genes'}};  }
+		if (scalar @{ $p->{'stats'} } == 0){  
+			@{ $p->{'stats'} } = map { $gene_data{$_}->{stat} } @{$p->{'genes'}};  
+		}
 		map { 
 			$genes_in_paths{$_} = $gene_data{$_}->{stat}; 
 			push @{ $gene_2_paths_map{$_} }, $p->{name};
@@ -416,12 +422,6 @@ foreach my $gene_set_file (@$gmt){
 	}
 	close(GMT);
 }
-# remove redundant pathways. those that have the same genes with p-values
-my %nr = ();
-for (my $p = 0; $p < scalar @pathways; $p++){
-	if (exists $nr{ join "",@{ $pathways[$p]->{genes} } }){ splice(@pathways,$p,1); }
-	else { $nr{ join "",@{ $pathways[$p]->{genes} } } = ""; }
-}
 
 if (defined $ref_list){
 	foreach my $gn (keys %ref_genes){
@@ -430,6 +430,7 @@ if (defined $ref_list){
 		}
 	}
 }
+# if analysing only 1 pathway then reference list are all genes in pathways
 if (scalar @pathways == 1){
 	foreach my $gn (keys %gene_data){
 		if (exists $gene_data{lc($gn)}->{stat}){
@@ -534,7 +535,8 @@ if (defined $snpmap){
 			} else {
 				next;
 			}		
-			next unless (exists $genes_in_paths{lc($hugo)} or  exists $genes_in_paths{lc($ensembl)});
+			# exlude genes that are not in gene-sets
+			next unless (exists $genes_in_paths{lc($hugo)} or exists $genes_in_paths{lc($ensembl)});
 
 			my @first_snp_n_fields =  split(/\:/,$m[0]);
 			if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
@@ -566,7 +568,7 @@ if (defined $snpmap){
 			}
 			@mapped_snps = keys %nr_snps;
 			if ( scalar @mapped_snps == 0 ){
-				delete($gene_data{$gene_id});
+				delete( $genes_in_paths{ $gene_id } );
 				next;
 			}
 			$gene_data{$gene_id}->{snps} = [@mapped_snps];
@@ -579,6 +581,41 @@ if (defined $snpmap){
 
 	print_OUT("Reading genotypes for genes",$LOG);
 }
+
+
+# mean of all stats across the genome
+my $background_values;
+if (defined $all_are_background) {
+	my @values = ();
+	foreach my $gn (keys %gene_data){
+		push @values, $gene_data{$gn}->{stat};
+	}
+	$background_values = pdl @values;
+} else {
+	$background_values = pdl values %genes_in_paths;
+}
+print_OUT("  '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
+$background_values->inplace->setvaltobad( "inf" );
+$background_values->inplace->setvaltobad( "-inf" );
+my $mu = $background_values->davg;
+# sd of all stats across the genome
+my $sd = $background_values->stdv;
+
+print_OUT("  '-> Background mean = [ $mu ] and stdv [ $sd ]",$LOG);
+
+if (defined $print_ref_list){
+	print_OUT("Printing reference list to [ $out.refList ]",$LOG);
+	my @ids= ();
+	if (defined $all_are_background) {
+		@ids = keys %gene_data;
+	} else {
+		@ids = keys %genes_in_paths;
+	}
+	open (REFLIST,">$out.refList") or print_OUT("I cannot write to [ $out.refList ]") and exit(1);
+	print REFLIST join "\n", @ids;
+	close(REFLIST);
+}
+
 my %snp_genotype_stack = ();
 my %correlation_stack  = ();
 my %gene_genotype_var  = ();
@@ -592,6 +629,7 @@ if (defined $bfile){
 		
 		my @new_genes = ();
 		foreach my $gn ( @{$p->{ genes } } ){
+			next if ( not exists $genes_in_paths{$gn} );
 			next if ( not exists $gene_data{$gn} );
 			next if ( not defined $gene_data{$gn}->{snps} );
 			next if ( $gene_data{$gn}->{genotypes}->isempty == 0 );
@@ -659,23 +697,6 @@ if (scalar (keys %gene_data) == 0){
 	exit(1);
 }
 
-# mean of all stats across the genome
-my $background_values;
-if (defined $all_are_background) {
-	my @values = ();
-	foreach my $gn (keys %gene_data){
-		push @values, $gene_data{$gn}->{stat};
-	}
-	$background_values = pdl @values;
-} else {
-	$background_values = pdl values %genes_in_paths;
-}
-print_OUT("  '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
-$background_values->inplace->setvaltobad( "inf" );
-$background_values->inplace->setvaltobad( "-inf" );
-my $mu = $background_values->average;
-# sd of all stats across the genome
-my $sd = $background_values->stdv;
 
 # if permutation are performed store null distribution in here
 my %null_size_dist = ();
@@ -688,7 +709,7 @@ if (defined $append){
 	print OUT "name\traw_p\traw_z";
 	
 	if (defined $bfile and defined $snpmap and defined $snp_assoc){
-		print OUT "\tZ_stouffer_fix\tV_fix\tZ_P_fix\tZ_stouffer_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";		
+		print OUT "\tZ_fix\tV_fix\tZ_P_fix\tZ_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";		
 	}
 	if (defined $perm){
 		print OUT ("\tempi_p:$set_stat\tempi_z:$set_stat\tmean_set\tmean_null\tsd_null");

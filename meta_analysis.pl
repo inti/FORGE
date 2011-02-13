@@ -6,9 +6,13 @@ use PDL;
 use PDL::GSL::CDF;
 use Data::Dumper;
 
+use GWAS_STATS qw( get_lambda_genomic_control );
+
 our (	$help,$man, $out, $w, $in_files,
 		$stouffer,$w_col,$random,$stat_or,
-		$stat_col,$id_col, $stat_pvalue,$header, $min_studies
+		$stat_col,$id_col, $stat_pvalue,$header, 
+		$min_studies, $gc_correction,$lambda,$sdtze,
+		$gc_correction_all
 );
 
 
@@ -25,6 +29,10 @@ GetOptions(
 	'stat_or'			=> \$stat_or,
 	'header'			=> \$header,
 	'min_studies|min_st=i' => \$min_studies,
+	'gc_correction=i@'		=> \$gc_correction,
+	'gc_correction_all'		=> \$gc_correction_all,
+	'lambda=i@'			=> \$lambda,
+	'sdtze=i@'			=> \$sdtze,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -51,9 +59,14 @@ my %total_seen = (); # records how many times and ids has been seen
 # weights can be either variable specific is provided with the option -w_col 
 # or study specific if provided with the option -w
 # if the option -w_col is defined then for each file the variable weight will be extracted
-my @study_weights = list pdl ones scalar @$in_files;
+my @study_weights = list ones scalar @$in_files;
 if (defined $w){
 	@study_weights = @$w;
+}
+
+# defined gc_correction for all studies
+if (defined $gc_correction_all){
+	$gc_correction = [ list ones scalar @$in_files ];
 }
 
 open(OUT,">$out") or die $!;
@@ -117,6 +130,50 @@ foreach my $file (@$in_files) {
 	close(IN);
 }
 
+if (defined $gc_correction){
+	print_OUT("Calculating lambda for genomic control correction");
+	
+	my %studies_p = ();
+	foreach my $var (keys %data){
+		my $f_counter = 0;
+		foreach my $file ( @$in_files ){
+			my $st = $file;
+			($st) = ( $file =~ m/[\/\w+]{1,}\/(.*)/ ) if ($file =~ m/\//);
+			if (not exists $data{$var}{$st}){
+				$f_counter++; 
+				next;
+			}
+			next unless ($gc_correction->[$f_counter++] == 1);
+			push @{ $studies_p{$st} }, 1 - gsl_cdf_ugaussian_P($data{$var}{$st}->{stat});
+		} 
+	}
+	foreach my $st ( keys %studies_p ){
+		print_OUT(" '-> [ $st ]");
+		my $gc_lambda = get_lambda_genomic_control($studies_p{$st});
+		print_OUT("   '-> lambda (median) of [ $gc_lambda ]");
+		if ($gc_lambda > 1){
+			print_OUT("   '-> Applying GC correction in [ $st ]");
+			my $assoc_p = [];
+			foreach my $var (keys %data) {
+				next unless (exists $data{$var}{$st});
+				my $p = 1 - gsl_cdf_ugaussian_P($data{$var}{$st}->{stat});
+				if ( $p == 1){
+					push @{ $assoc_p }, $p;
+					next;
+				}
+				my $var_chi = gsl_cdf_chisq_Pinv ( 1 - $p , 1 );
+				$var_chi /=  $gc_lambda;
+				$p = gsl_cdf_chisq_P( $var_chi, 1 );
+				$data{$var}{$st}->{stat} = gsl_cdf_ugaussian_Pinv( $p );
+				push @{ $assoc_p }, 1 - $p;
+			}
+			$gc_lambda = get_lambda_genomic_control($assoc_p);
+			print_OUT("   '-> After correction the lambda is [ $gc_lambda ]");
+		} else {
+			print_OUT("   '-> GC correction not applied because lambda is less than 1");
+		}
+	}
+}
 
 print_OUT("Calculating Stats");
 print OUT join "\t", ("id","stouffer_fix","B_fix","Var_fix","Chi-square_df1_fix","B_fix_P","stouffer_fix","B_random","Var_random","Chi-square_df1_random","B_random_P","Q","Q_P","tau_squared","I2","N","binomial_rank_pvalue",@studies);
@@ -168,7 +225,9 @@ foreach my $gn ( keys %data ) {
 			if   ( exists $data{ $gn }{$_} ) { printf OUT ("\t%.6f(%.3f)",$data{ $gn }{$_}->{'stat'},1/$data{ $gn }{$_}->{'w'}); }
 			else { print OUT "\tNA"; }			
 		} else {
-			if   ( exists $data{ $gn }{$_} ) { printf OUT ("\t%.6f",$data{ $gn }{$_}->{'stat'}); }
+			if   ( exists $data{ $gn }{$_} ) { printf OUT ("\t%.6f",$data{ $gn }{$_}->{'stat'}); 
+				#print Dumper($data{ $gn }),"\n";
+			}
 			else { print OUT "\tNA"; }
 		}
 	} @studies;

@@ -63,6 +63,7 @@ sub get_makambi_chi_square_and_df {
 
 sub z_based_gene_pvalues {
 	my $gene = shift;
+	my $mnd = shift;
 	if ( ref($gene->{'pvalues'}) eq 'ARRAY'){ $gene->{'pvalues'} = pdl @{ $gene->{'pvalues'} }; }
 	if ( ref($gene->{'effect_size'}) eq 'ARRAY'){ $gene->{'effect_size'} = pdl @{ $gene->{'effect_size'} }; }
 	if ( ref($gene->{'effect_size_se'}) eq 'ARRAY'){ $gene->{'effect_size_se'} = pdl @{ $gene->{'effect_size_se'} }; }
@@ -72,9 +73,11 @@ sub z_based_gene_pvalues {
 	}
 	my $cov;
 	if (defined $gene->{cor_ld_r}){
-		$cov = $gene->{cor_ld_r}**2;
+		if (defined $mnd) { $cov = $gene->{cor_ld_r} }
+		else { $cov = $gene->{cor_ld_r}**2; }
 	} else {
-		$cov = $gene->{cor}**2;
+		if (defined $mnd) { $cov = $gene->{cor}; }
+		else { $cov = $gene->{cor}**2; }
 	}
 	my $pvals = $gene->{'pvalues'};
 	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;

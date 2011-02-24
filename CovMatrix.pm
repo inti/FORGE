@@ -25,8 +25,8 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( cov_shrink make_positive_definite );	# symbols to export by default
-@EXPORT_OK = qw( cov_shrink make_positive_definite); # symbols to export on request
+@EXPORT = qw( cov_shrink make_positive_definite is_positive_definite);	# symbols to export by default
+@EXPORT_OK = qw( cov_shrink make_positive_definite is_positive_definite); # symbols to export on request
 
 
 
@@ -87,6 +87,18 @@ sub make_positive_definite {
 	return($m + $dm)
 }
 
+
+sub is_positive_definite {
+	my $m = shift;
+	my $tol = shift;
+	my ($es,$esv) = eigens $m;
+	if (not defined $tol){ $tol = $m->getdim(0) * max(abs($esv)) * 2e-8; }
+	if ( sum($esv > $tol) == scalar( $esv->list) ) {
+		return(0);
+	} else {
+		return(1);
+	}
+}
 =head
  sub is_positive_definite
  function (m, tol, method = c("eigen", "chol")) 

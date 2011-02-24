@@ -23,7 +23,8 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
-	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,
+	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
+	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd
 );
 
 GetOptions(
@@ -63,6 +64,10 @@ GetOptions(
 	'gmt_max_size=i' =>	\$gmt_max_size,
 	'gene_type|type=s@' => \$include_gene_type,
 	'exclude_gene_type|exclude_type=s@' => \$exclude_gene_type, 
+	'mnd' => \$mnd,
+	'mnd_target=i' => \$mnd_sim_target,
+	'mnd_max=i' => \$mnd_sim_max,
+	'mnd_methods=s' => \$mnd_sim_wise_correction_methods,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -75,6 +80,21 @@ $LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$
 
 print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
 print_OUT("LOG file will be written to [ $out.log ]",$LOG);
+
+# define parameter for mnd simulation
+defined $mnd_sim_target or $mnd_sim_target = 10;
+defined $mnd_sim_max or $mnd_sim_max = 100_000;
+if (defined $mnd_sim_wise_correction_methods){
+	$mnd_sim_wise_correction_methods = [ split(/\,/,$mnd_sim_wise_correction_methods) ];
+} else { $mnd_sim_wise_correction_methods = [0,1,2,3]; }
+
+if (defined $mnd){
+	print_OUT("Will run multivariate normal distribution simulations to estimate significance",$LOG);
+	print_OUT("   '-> max number [ $mnd_sim_max ] or until statistic is seen [ $mnd_sim_target ] times",$LOG);
+	my @m = ('sidak','fisher','z_fix','z_random');
+	@m = @m[@$mnd_sim_wise_correction_methods];
+	print_OUT("   '-> for each gene best p-value will be selected among the methods [ @m ] ",$LOG);
+}
 
 # defines min and max size for gene-set analyses
 defined $gmt_min_size or $gmt_min_size = 2;
@@ -134,11 +154,19 @@ if (defined $geno_probs){
 my $OUT = new IO::File; 
 $OUT->open(">$out") or print_OUT("I can not open [ $out ] to write to",$LOG) and exit(1);
 
-print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
-print $OUT "\tmin_p\tmin_p_SIDAK\tFISHER\tFISHER_chi-square\tFISHER_df";
-print $OUT "\tB_fix\tVar_fix\tB_P_fix\tB_random\tVar_random\tB_P_random";
-print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
-print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
+if (not defined $mnd){
+	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
+	print $OUT "\tmin_p\tmin_p_SIDAK\tFISHER\tFISHER_chi-square\tFISHER_df";
+	print $OUT "\tB_fix\tVar_fix\tB_P_fix\tB_random\tVar_random\tB_P_random";
+	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
+	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
+} else {
+	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
+	print $OUT "\tmin_p\tVEGAS\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_fix\tSIM_Z_random";
+	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
+	print $OUT "\tSIM_BEST_P\tSIM_BEST_method\tN_SIM";
+	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
+}
 
 # i will read the gene_list and i will load data for just this genes to speed up.
 if ( not defined $all_genes and not defined @genes and not defined $gene_list){
@@ -341,11 +369,17 @@ map {
 print_OUT("Loading SNP-2-Gene mapping");
 
 for (my $i = 0; $i < scalar @$snpmap; $i++){
-	if ($snpmap->[$i] =~ m/\#/){
+	if ($snpmap->[$i] =~ m/\#\d+\-\d+\#/) {
+		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for chromosome interval.");
+		my ($s,$e) = ($snpmap->[$i] =~ m/\#(\d+)\-(\d+)\#/);
+		push @{$snpmap}, @{ make_file_name_array_interval($snpmap->[$i],$s,$e) };
+		splice(@$snpmap,$i,1);			
+	}
+	if ($snpmap->[$i] =~ m/\#/) {
 		print_OUT("   '-> Found [ # ] key on [ $snpmap->[$i] ]. I will generate file names for 26 chromosomes.");
 		push @{$snpmap}, @{ make_file_name_array($snpmap->[$i]) };
 		splice(@$snpmap,$i,1);
-	}
+	} 
 }
 
 my %gene = ();
@@ -699,7 +733,7 @@ if (defined $bfile) {
 	# Calculate the weights for the gene
 	$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
 	# calculate gene p-values
-	my $z_based_p = z_based_gene_pvalues($gene{$gn});
+	my $z_based_p = z_based_gene_pvalues($gene{$gn},$mnd);
 	if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
 		$z_based_p = {
 			'B_stouffer_fix' => "NA",
@@ -720,27 +754,62 @@ if (defined $bfile) {
 		};
 	} 
 	my $pvalue_based_p = gene_pvalue($gn);
-
-	print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
-		$gene{$gn}->{pvalues}->min,
-		$pvalue_based_p->{sidak_min_p},
-		$pvalue_based_p->{fisher},
-		$pvalue_based_p->{fisher_chi},
-		$pvalue_based_p->{fisher_df},
-		$z_based_p->{'B_fix'},
-		$z_based_p->{'V_fix'},
-		$z_based_p->{'Z_P_fix'},
-		$z_based_p->{'B_random'},
-		$z_based_p->{'V_random'},
-		$z_based_p->{'Z_P_random'},
-		$z_based_p->{'I2'},
-		$z_based_p->{'Q'},
-		$z_based_p->{'Q_P'},
-		$z_based_p->{'tau_squared'},
-		$pvalue_based_p->{Meff_Galwey},
-		$pvalue_based_p->{Meff_gao},
-		scalar @{ $gene{$gn}->{geno_mat_rows} });
-	print $OUT "\n";
+	  
+	if (not defined $mnd){
+		print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$pvalue_based_p->{sidak_min_p},
+			$pvalue_based_p->{fisher},
+			$pvalue_based_p->{fisher_chi},
+			$pvalue_based_p->{fisher_df},
+			$z_based_p->{'B_fix'},
+			$z_based_p->{'V_fix'},
+			$z_based_p->{'Z_P_fix'},
+			$z_based_p->{'B_random'},
+			$z_based_p->{'V_random'},
+			$z_based_p->{'Z_P_random'},
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			$z_based_p->{'Q_P'},
+			$z_based_p->{'tau_squared'},
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
+			print $OUT "\n";
+	  } else {
+		  my $simulated_p = {
+			  'sidak' => 'NA',
+			  'fisher' => 'NA',
+			  'z_fix' => 'NA',
+			  'z_random' => 'NA',
+			  'vegas' => 'NA',
+			  'wise_p' => 'NA',
+			  'wise_method' => 'NA',
+			  'N' => 0,
+		  };
+		  if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
+			  $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
+		  }
+		  print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			  $gene{$gn}->{pvalues}->min,
+			  $simulated_p->{vegas},
+			  $simulated_p->{sidak},
+			  $simulated_p->{fisher},
+			  $simulated_p->{z_fix},
+			  $simulated_p->{z_random},
+			  $z_based_p->{'I2'},
+			  $z_based_p->{'Q'},
+			  $z_based_p->{'Q_P'},
+			  $z_based_p->{'tau_squared'},
+			  $simulated_p->{wise_p},
+			  $simulated_p->{wise_method},
+			  $simulated_p->{N},
+			  $pvalue_based_p->{Meff_Galwey},
+			  $pvalue_based_p->{Meff_gao},
+			  scalar @{ $gene{$gn}->{geno_mat_rows} });
+			  print $OUT "\n";
+	  }
+	  
 	# remove LD measures and genotypes from the stack that will not use again to free memory
 	foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
 	  if (scalar @{ $snp_to_gene{ $snp } } == 1){
@@ -804,7 +873,7 @@ if (defined $bfile) {
 					$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
 					
 					# calculate gene p-values
-					my $z_based_p = z_based_gene_pvalues($gene{$gn});
+					my $z_based_p = z_based_gene_pvalues($gene{$gn},$mnd);
 					if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
 						$z_based_p = {
 							'B_stouffer_fix' => "NA",
@@ -936,6 +1005,146 @@ sub deal_with_weights {
 	return($back);
 	
 }
+
+sub simulate_mnd {
+	use PDL::LinearAlgebra;
+	my $target = shift; # min times stat must be seen to finish simulations
+	my $MAX = shift; # max number of simulations
+	my $sidak = shift;
+	my $k = shift;
+	my $fisher = shift;
+	my $z_fix = shift;
+	my $z_random = shift;
+	my $gene_data = shift; # hash ref with gene informatio
+	my $compare_wise_p = shift; # ARRAY ref
+	
+	defined $MAX or $MAX = 1_000_000;
+	defined $compare_wise_p or $compare_wise_p = [0..3];
+	
+	my $cov = $gene_data->{cor};
+	my $i = 0;
+	eval { mchol ($cov) };
+	while($@ ne ""){
+		$@ = "";
+		$i++;
+		if ($i > 25){
+			last;
+		}
+		my ($es,$esv) = eigens $cov;
+		$cov = make_positive_definite($cov,1e-8);
+		($es,$esv) = eigens $cov;
+		eval { mchol ($cov) };
+	}
+	
+	if (is_positive_definite($cov,1e-8) == 1){
+		$cov = make_positive_definite($cov,1e-8);
+	}
+	
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov = $gene_data->{cor};
+		$cov->diagonal(0,1) .= 1.0001; 
+	}
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov->diagonal(0,1) .= 1.001; 
+	}
+	if(is_positive_definite($cov,1e-8) == 1){
+		$cov->diagonal(0,1) .= 1.01; 		
+	}
+	
+	
+	if (is_positive_definite($cov,1e-8) == 1){
+		print "Matrix never positive definite $gene_data->{ensembl}\t$gene_data->{hugo}\t",scalar @{$gene_data->{'geno_mat_rows'}},"\n";
+		return(-9);
+	}
+	
+	my $cholesky = mchol($cov);
+	my $total = 0;
+	my $step=10;
+	my $SEEN = zeroes 4;
+	my $stats_bag = [];
+	my $fake_gene = {
+		'pvalues' => "",
+		'effect_size' => $gene_data->{'effect_size'},
+		'effect_size_se' => $gene_data->{'effect_size_se'},
+		'cor' => $gene_data->{'cor'},
+		'weights' => $gene_data->{'weights'},
+		'geno_mat_rows' => $gene_data->{'geno_mat_rows'},
+	};
+	
+
+	my $vegas_stat = dsum gsl_cdf_chisq_Pinv(1-$gene_data->{pvalues},1);
+	my $vegas_count = 0;
+	while ($SEEN->min < $target){
+		my ($sim,$c) = rmnorm($step,0,$cov,$cholesky);
+		$sim = $sim**2;
+		$vegas_count += dsum( $sim->xchg(0,1)->dsumover >= $vegas_stat);
+		$sim =  1 - gsl_cdf_chisq_P($sim,1);
+		for (my $sim_n = 0; $sim_n < $sim->getdim(0); $sim_n++){
+			$fake_gene->{'pvalues'} = $sim->($sim_n,)->flat;
+			my $sim_n_gene_p = z_based_gene_pvalues($fake_gene,$mnd);
+			
+			my ($sim_fisher_chi_stat,$sim_fisher_df) = get_makambi_chi_square_and_df($gene_data->{cor},$gene_data->{weights},$fake_gene->{'pvalues'} );
+			my $sim_fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($sim_fisher_chi_stat, $sim_fisher_df );
+			my $sim_sidak = 1 - (1 - $fake_gene->{'pvalues'}->min)**$k;
+			
+			$SEEN->(0)++ if ( $sidak >= $sim_sidak );
+			$SEEN->(1)++ if ( $fisher >= $sim_fisher_p_value );
+			$SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
+			$SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
+			
+			my @sim_gene_ps = ($sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'});
+			
+			push @{$stats_bag}, @sim_gene_ps[ @$compare_wise_p ];
+			
+		}
+		$total += $step;
+		if ($step < 100_000){ $step *=10; }
+		last if ($total > $MAX);
+	}
+	my $back = {
+		'sidak' => sclr ($SEEN->(0)+1)/($total +1),
+		'fisher' => sclr ($SEEN->(1)+1)/($total +1),
+		'z_fix' => sclr ($SEEN->(2)+1)/($total +1),
+		'z_random' => sclr ($SEEN->(3)+1)/($total +1),
+		'vegas' => ($vegas_count +1)/($total +1),
+		'wise_p' => undef,
+		'wise_method' => undef,
+		'N' => $total,
+	};
+	my @methods = ('sidak','fisher','z_fix','z_random');
+	@methods = @methods[@$compare_wise_p];
+	my $wise_correction = zeroes scalar @methods;
+
+	$stats_bag = pdl $stats_bag; 
+	my $total_stats = $stats_bag->nelem;
+	
+	for (my $i = 0; $i < scalar @methods; $i++){
+		$wise_correction->( $i ) .= ( sum($back->{ $methods[$i] } >= $stats_bag) + 1)/( $total_stats + 1);
+	}
+	#print $wise_correction,"\n";
+	my $min = $wise_correction->minimum_ind();
+	$back->{'wise_p'} = sclr $wise_correction->( $min );
+	$back->{'wise_method'} = $methods[$min];
+	#print Dumper($back);
+	#getc;
+	return( $back );
+	
+}
+
+sub rmnorm {
+	my $n = shift;
+	my $mean = shift;
+	my $c = shift;
+	my $chol = shift;
+	my @back = ();
+	my $d = $c->getdim(0);
+	my $vector = mpdl grandom $d,$n;
+	if (not defined $chol) { $chol = mchol($c); }
+	my $z = $vector x $chol->transpose;
+	my $y = transpose( $mean + transpose($z));
+	return($y,$chol);
+}
+
 	
 
 sub deal_with_correlations {
@@ -1023,6 +1232,17 @@ sub make_file_name_array {
 	my @back = ();
 	my @body = split(/\#/,$file);
 	for my $chr (1..26){
+		push @back, join "$chr", @body;
+	}
+	return([@back]);
+}
+sub make_file_name_array_interval {
+	my $file = shift;
+	my $s = shift;
+	my $e = shift;
+	my @back = ();
+	my @body = split(/\#.*\#/,$file);
+	for my $chr ($s..$e){
 		push @back, join "$chr", @body;
 	}
 	return([@back]);
@@ -1242,6 +1462,13 @@ script [options]
 	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
 	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2
 	-gmt_max_size		Max number of genes in gene-sets to be analysed. default = 999999999
+ 
+	Multivariate Normal Distribution sampling
+	-mnd			Estimate significance by sampling from a multivatiate normal distribution
+	-mnd_target		minimum number of times the statistics must be seen to calculate the empirical p-value (default=10)
+	-mnd_max		maximim number of simulation (default = 1000000)
+	-mnd_methods	choose best method and correct using simulation backgroud. must specify integers: 0=sidak,1=fisher,2=z-fix,3=z-random,4=VEGAS
+					for example to choose between the sidak and z-random method use -mnd_methods 0,3
 
 	Weigthing
 	-weights, -w            File with SNP weights
@@ -1368,6 +1595,25 @@ Min number of genes in gene-sets to be analysed. default = 2
 =item B<-gmt_max_size>
  
 Max number of genes in gene-sets to be analysed. default = 999999999
+ 
+=item B<-mnd>
+ 
+Estimate significance by sampling from a multivatiate normal distribution
+
+=item B<-mnd_target>
+
+minimum number of times the statistics must be seen to calculate the empirical p-value (default=10)
+
+=item B<-mnd_max>	
+
+maximim number of simulation (default = 1000000)
+
+=item B<-mnd_methods>
+
+choose best method and correct using simulation backgroud. must specify integers: 0=sidak,1=fisher,2=z-fix,3=z-random,4=VEGAS
+for example to choose between the sidak and z-random method use -mnd_methods 0,3
+Is you used results of the method VEGAS please cite as ... "gene p-values calculated with the method VEGAS (Liu, 2010) as implemented in FORGE (Pedroso, submitted)" ...
+Liu JZ, McRae AF, Nyholt DR, Medland SE, Wray NR, Brown KM, Hayward NK, Montgomery GW, Visscher PM, Martin NG, Macgregor S: A versatile gene-based test for genome-wide association studies. Am J Hum Genet 2010;87:139–145
 
 =item B<-weights, -w>
 
@@ -1400,8 +1646,11 @@ To perform a basic gene-based testing with the example files run:
 
 =item B<2. Adding gene-sets to the analysis>
  
-To perform a basic gene-based testing with the example files run:
+To perform a basic gene-based and gene-set testing with the example files run:
 
 >perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -gmt example/example.gmt
  
-
+To perform a basic gene-based analysis and estimate significance by simulation
+ 
+>perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -mnd
+ 

@@ -34,8 +34,8 @@ our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 # the elements of the array are pseudo hashes with all the sample's information
 sub read_fam {
 	my $fam = shift;
-	#print_OUT("Reading samples info from [ $fam ]");
-	open( FAM, $fam ) or #print_OUT("Cannot open [ $fam ] file") and exit(1);
+	print "Reading samples info from [ $fam ]\n";
+	open( FAM, $fam ) or print "Cannot open [ $fam ] file\n" and exit(1);
 	my @back = ();
 	while ( my $s = <FAM> ) {
 		my @data = split( /\s+/, $s );
@@ -59,8 +59,8 @@ sub read_bim {
 	my $bim = shift;
 	my $affy_to_rsid = shift;
 	my $affy_id = shift;
-	#print_OUT("Reading SNPs info from [ $bim ]");
-	open( BIM, $bim ) or #print_OUT("Cannot open [ $bim ] file") and exit(1);
+	print "Reading SNPs info from [ $bim ]\n";
+	open( BIM, $bim ) or print "Cannot open [ $bim ] file\n" and exit(1);
 	my @back = ();
 	while ( my $snp = <BIM> ) {
 		chomp($snp);

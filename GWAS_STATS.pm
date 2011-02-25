@@ -27,8 +27,8 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( get_maf get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
-@EXPORT_OK = qw( get_maf get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
+@EXPORT = qw( get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
+@EXPORT_OK = qw( get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
 
 
 # this subroutine applies the makambi method to combine p-values from correlated test

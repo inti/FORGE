@@ -89,6 +89,7 @@ if (defined $mnd_sim_wise_correction_methods){
 } else { $mnd_sim_wise_correction_methods = [0,1,2,3]; }
 
 if (defined $mnd){
+	use PDL::LinearAlgebra qw (mchol);
 	print_OUT("Will run multivariate normal distribution simulations to estimate significance",$LOG);
 	print_OUT("   '-> max number [ $mnd_sim_max ] or until statistic is seen [ $mnd_sim_target ] times",$LOG);
 	my @m = ('sidak','fisher','z_fix','z_random');
@@ -1007,7 +1008,6 @@ sub deal_with_weights {
 }
 
 sub simulate_mnd {
-	use PDL::LinearAlgebra;
 	my $target = shift; # min times stat must be seen to finish simulations
 	my $MAX = shift; # max number of simulations
 	my $sidak = shift;
@@ -1017,10 +1017,11 @@ sub simulate_mnd {
 	my $z_random = shift;
 	my $gene_data = shift; # hash ref with gene informatio
 	my $compare_wise_p = shift; # ARRAY ref
-	
-	defined $MAX or $MAX = 1_000_000;
-	defined $compare_wise_p or $compare_wise_p = [0..3];
-	
+		
+	my $max_step_size = 100_000;
+	my $total = 0;
+	my $step=100;
+
 	my $cov = $gene_data->{cor};
 	my $i = 0;
 	eval { mchol ($cov) };
@@ -1058,8 +1059,6 @@ sub simulate_mnd {
 	}
 	
 	my $cholesky = mchol($cov);
-	my $total = 0;
-	my $step=10;
 	my $SEEN = zeroes 4;
 	my $stats_bag = [];
 	my $fake_gene = {
@@ -1076,11 +1075,13 @@ sub simulate_mnd {
 	my $vegas_count = 0;
 	while ($SEEN->min < $target){
 		my ($sim,$c) = rmnorm($step,0,$cov,$cholesky);
-		$sim = $sim**2;
-		$vegas_count += dsum( $sim->xchg(0,1)->dsumover >= $vegas_stat);
-		$sim =  1 - gsl_cdf_chisq_P($sim,1);
-		for (my $sim_n = 0; $sim_n < $sim->getdim(0); $sim_n++){
-			$fake_gene->{'pvalues'} = $sim->($sim_n,)->flat;
+		my $sim_chi_df1 = $sim**2;
+		$vegas_count += dsum( $sim_chi_df1->xchg(0,1)->dsumover >= $vegas_stat);
+		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
+		$sim_chi_df1 = '';
+		$sim = '';
+		for (my $sim_n = 0; $sim_n < $sim_p->getdim(0); $sim_n++){
+			$fake_gene->{'pvalues'} = $sim_p->($sim_n,)->flat;
 			my $sim_n_gene_p = z_based_gene_pvalues($fake_gene,$mnd);
 			
 			my ($sim_fisher_chi_stat,$sim_fisher_df) = get_makambi_chi_square_and_df($gene_data->{cor},$gene_data->{weights},$fake_gene->{'pvalues'} );
@@ -1092,13 +1093,17 @@ sub simulate_mnd {
 			$SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
 			$SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
 			
-			my @sim_gene_ps = ($sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'});
-			
-			push @{$stats_bag}, @sim_gene_ps[ @$compare_wise_p ];
-			
+			my @sim_gene_ps = ( $sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'} );
+			push @{$stats_bag}, [ @sim_gene_ps[ @$compare_wise_p ] ];
 		}
 		$total += $step;
-		if ($step < 100_000){ $step *=10; }
+		if ($SEEN->min != 0){
+			$step = 1.1*(10*($total)/$SEEN->min);
+		} elsif ($step < $max_step_size){ 
+			$step *=10; 
+		}
+		if ($step > $MAX){ $step = $MAX; }
+
 		last if ($total > $MAX);
 	}
 	my $back = {
@@ -1113,22 +1118,17 @@ sub simulate_mnd {
 	};
 	my @methods = ('sidak','fisher','z_fix','z_random');
 	@methods = @methods[@$compare_wise_p];
-	my $wise_correction = zeroes scalar @methods;
+	my $methods_p = pdl ($back->{sidak},$back->{fisher},$back->{z_fix},$back->{z_random});
+	$stats_bag = pdl $stats_bag;
+	$stats_bag = gsl_cdf_ugaussian_Pinv($stats_bag);
+	my $stat_cor = cov_shrink($stats_bag);
+	my ($stats_Meff_gao,$stats_Meff_galwey) = number_effective_tests(\$stat_cor->{cor});
 
-	$stats_bag = pdl $stats_bag; 
-	my $total_stats = $stats_bag->nelem;
-	
-	for (my $i = 0; $i < scalar @methods; $i++){
-		$wise_correction->( $i ) .= ( sum($back->{ $methods[$i] } >= $stats_bag) + 1)/( $total_stats + 1);
-	}
-	#print $wise_correction,"\n";
-	my $min = $wise_correction->minimum_ind();
-	$back->{'wise_p'} = sclr $wise_correction->( $min );
+	my $min = $methods_p->minimum_ind();
+	$back->{'wise_p'} = sclr 1 - ( 1 - $methods_p->( $min ) )**$stats_Meff_gao;
 	$back->{'wise_method'} = $methods[$min];
-	#print Dumper($back);
-	#getc;
-	return( $back );
-	
+	$back->{'stats_gao'} = $stats_Meff_gao;
+	return( $back );	
 }
 
 sub rmnorm {
@@ -1649,8 +1649,20 @@ To perform a basic gene-based testing with the example files run:
 To perform a basic gene-based and gene-set testing with the example files run:
 
 >perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -gmt example/example.gmt
+
+You will need to run a whole-genome analysis when using gene-sets. Check option below.
+
+=item B<3. Using simulations to estimate significance>
  
 To perform a basic gene-based analysis and estimate significance by simulation
  
 >perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -mnd
- 
+
+=item B<4. Running a whole-genome analysis>
+
+To perform a whole-genome analysis using our SNP-to-gene annotation files. Please note we do not provide example files for this.
+The # symbol in the SNP-to-gene annotation file name means "analyse from chromosome 1 to 26".
+
+>perl forge.pl -bfile whole_genome_genotypes -assoc whole_genome_genotypes.assoc -snpmap Ensemble_gene_SNP_v59/ensemblv59_SNP_2_GENE.chr#.txt -out whole_genome.txt -mnd
+
+This syntax can be modified a bit to analysis sub-sets of chromosomes by chaging ensemblv59_SNP_2_GENE.chr#.txt with ensemblv59_SNP_2_GENE.chr#20-22#.txt, in this case to analyse chromosomes 20 to 22.

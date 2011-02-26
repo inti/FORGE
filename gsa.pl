@@ -9,6 +9,9 @@ use PDL::GSL::CDF;
 use PDL::Stats::Basic;
 use PDL::Ufunc;
 use Data::Dumper;
+use IO::File;
+use IO::Handle;
+use IO::Uncompress::Gunzip qw(gunzip);
 
 # Load local functions
 use GWAS_IO;
@@ -536,9 +539,19 @@ if (defined $snpmap){
 			print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
 			next;
 		}
-		open( MAP, $snp_gene_mapping_file ) or print_OUT ("Can not open [ $snp_gene_mapping_file ] file") and exit(1);
-		print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
-		while ( my $read = <MAP> ) {
+		my $MAP = '';
+		if ( $snp_gene_mapping_file =~ m/.gz$/) {
+			print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+			$MAP = new IO::Uncompress::Gunzip $snp_gene_mapping_file;
+		} else {
+			$MAP = new IO::Handle;
+			my $fh = new IO::File;
+			print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+			$fh->open("$snp_gene_mapping_file");
+			$MAP->fdopen(fileno($fh),"r");
+		}
+		
+		while (my $read = $MAP->getline()) {
 			chomp($read);
 			# the line is separate in gene info and snps. the section are separated by a tab.
 			my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
@@ -592,9 +605,9 @@ if (defined $snpmap){
 			$gene_data{$gene_id}->{start} = $start;
 			$gene_data{$gene_id}->{end} = $end;
 		}
-		close(MAP);
+		$MAP->close;
 	}
-
+	
 	print_OUT("Reading genotypes for genes",$LOG);
 }
 

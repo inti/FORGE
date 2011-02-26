@@ -1022,42 +1022,13 @@ sub simulate_mnd {
 	my $total = 0;
 	my $step=100;
 
-	my $cov = $gene_data->{cor};
 	my $i = 0;
-	eval { mchol ($cov) };
-	while($@ ne ""){
-		$@ = "";
-		$i++;
-		if ($i > 25){
-			last;
-		}
-		my ($es,$esv) = eigens $cov;
-		$cov = make_positive_definite($cov,1e-8);
-		($es,$esv) = eigens $cov;
-		eval { mchol ($cov) };
-	}
 	
-	if (is_positive_definite($cov,1e-8) == 1){
-		$cov = make_positive_definite($cov,1e-8);
-	}
-	
-	if(is_positive_definite($cov,1e-8) == 1){
-		$cov = $gene_data->{cor};
-		$cov->diagonal(0,1) .= 1.0001; 
-	}
-	if(is_positive_definite($cov,1e-8) == 1){
-		$cov->diagonal(0,1) .= 1.001; 
-	}
-	if(is_positive_definite($cov,1e-8) == 1){
-		$cov->diagonal(0,1) .= 1.01; 		
-	}
-	
-	
-	if (is_positive_definite($cov,1e-8) == 1){
+	my ($cov,$status) = check_positive_definite($gene_data->{cor},1e-8);
+	if ($status == 1){
 		print "Matrix never positive definite $gene_data->{ensembl}\t$gene_data->{hugo}\t",scalar @{$gene_data->{'geno_mat_rows'}},"\n";
 		return(-9);
 	}
-	
 	my $cholesky = mchol($cov);
 	my $SEEN = zeroes 4;
 	my $stats_bag = [];
@@ -1129,20 +1100,6 @@ sub simulate_mnd {
 	$back->{'wise_method'} = $methods[$min];
 	$back->{'stats_gao'} = $stats_Meff_gao;
 	return( $back );	
-}
-
-sub rmnorm {
-	my $n = shift;
-	my $mean = shift;
-	my $c = shift;
-	my $chol = shift;
-	my @back = ();
-	my $d = $c->getdim(0);
-	my $vector = mpdl grandom $d,$n;
-	if (not defined $chol) { $chol = mchol($c); }
-	my $z = $vector x $chol->transpose;
-	my $y = transpose( $mean + transpose($z));
-	return($y,$chol);
 }
 
 	

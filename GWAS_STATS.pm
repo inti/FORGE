@@ -27,8 +27,25 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
-@EXPORT_OK = qw( get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
+@EXPORT = qw(  rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
+@EXPORT_OK = qw(  rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
+
+
+
+
+sub rmnorm {
+	my $n = shift;
+	my $mean = shift;
+	my $c = shift;
+	my $chol = shift;
+	my @back = ();
+	my $d = $c->getdim(0);
+	my $vector = mpdl grandom $d,$n;
+	if (not defined $chol) { $chol = mchol($c); }
+	my $z = $vector x $chol->transpose;
+	my $y = transpose( $mean + transpose($z));
+	return($y,$chol);
+}
 
 
 # this subroutine applies the makambi method to combine p-values from correlated test
@@ -73,12 +90,12 @@ sub z_based_gene_pvalues {
 	}
 	my $cov;
 	if (defined $gene->{cor_ld_r}){
-		if (defined $mnd) { $cov = $gene->{cor_ld_r} }
-		else { $cov = $gene->{cor_ld_r}**2; }
+		$cov = $gene->{cor_ld_r};
 	} else {
-		if (defined $mnd) { $cov = $gene->{cor}; }
-		else { $cov = $gene->{cor}**2; }
+		$cov = $gene->{cor};
 	}
+	if (not defined $mnd) { $cov = $cov**2; }
+	
 	my $pvals = $gene->{'pvalues'};
 	$pvals->index( which($pvals == 1) ) .= double 1-2.2e-16;
 	$pvals->index( which($pvals == 0) ) .= double 2.2e-16;

@@ -25,8 +25,8 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( cov_shrink make_positive_definite is_positive_definite);	# symbols to export by default
-@EXPORT_OK = qw( cov_shrink make_positive_definite is_positive_definite); # symbols to export on request
+@EXPORT = qw( check_positive_definite cov_shrink make_positive_definite is_positive_definite);	# symbols to export by default
+@EXPORT_OK = qw( check_positive_definite cov_shrink make_positive_definite is_positive_definite); # symbols to export on request
 
 
 
@@ -333,5 +333,50 @@ sub pvt_corlambda {
 	}
 	return($lambda);
 }
+
+sub check_positive_definite {
+	my $cov_in = shift;
+	my $tol = shift;
+	
+	defined $tol or $tol = 1e-8;
+	my $status = 0;
+	my $cov = $cov_in;
+	eval { mchol ($cov) };
+	my $i = 0;
+	while($@ ne ""){
+		$@ = "";
+		$i++;
+		if ($i > 25){
+			last;
+		}
+		my ($es,$esv) = eigens $cov;
+		$cov = make_positive_definite($cov,$tol);
+		($es,$esv) = eigens $cov;
+		eval { mchol ($cov) };
+	}
+	
+	if (is_positive_definite($cov,$tol) == 1){
+		$cov = make_positive_definite($cov,$tol);
+	}
+	
+	if(is_positive_definite($cov,$tol) == 1){
+		$cov = $cov_in;
+		$cov->diagonal(0,1) .= 1.0001; 
+	}
+	if(is_positive_definite($cov,$tol) == 1){
+		$cov->diagonal(0,1) .= 1.001; 
+	}
+	if(is_positive_definite($cov,$tol) == 1){
+		$cov->diagonal(0,1) .= 1.01; 		
+	}
+	
+	
+	if (is_positive_definite($cov,$tol) == 1){
+		print "Matrix never positive definite\n";
+		$status = 1;
+	}
+	return($cov,$status);	
+}
+
 
 1;

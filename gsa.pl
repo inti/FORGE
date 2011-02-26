@@ -26,7 +26,8 @@ our (	$help, $man, $gmt, $pval,
 	$interval_merge_by_chr, $node_similarity, $cgnets_all,
 	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
-	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list
+	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list,
+	$mnd,$mnd_N,$gene_p_type
 );
 
 GetOptions(
@@ -67,6 +68,9 @@ GetOptions(
 	'quick_gene_cor' => \$quick_gene_cor,
 	'gene_cor_max_dist=i' => \$gene_cor_max_dist,
 	'print_ref_list' => \$print_ref_list,
+	'mnd' => \$mnd,
+	'mnd_n=i' => \$mnd_N,
+	'gene_p_type' => \$gene_p_type,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -103,6 +107,18 @@ defined $distance or $distance = 20;
 defined $report or $report = 250;
 defined $max_size or $max_size = 99_999_999; 
 defined $min_size or $min_size = 10;
+if (defined $mnd){
+	defined $mnd_N or $mnd_N = 1000;
+	if (defined $gene_p_type) {
+		unless (grep $_ eq $gene_p_type, ('sidak','fisher','z_fix','z_random')){
+			print_OUT("I do not recognise the gene p-valyes type entered [ $gene_p_type ]\n");
+			print_OUT("Option are sidak, fisher, z_fix and z_random");
+			print_OUT("bye!");
+			exit(1);
+		}
+	} else { $gene_p_type = 'z_fix'; }
+	print_OUT("Will use multivariate normal distribution sampling to estimate gene-gene correlations. Using [ $mnd_N ] simulations with the [ $gene_p_type] gene p-value");
+}	
 print_OUT("Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size",$LOG);
 
 if (defined $recomb_intervals) {
@@ -669,7 +685,7 @@ if (defined $bfile){
 		$p->{stats} = [ @stats ];
 		$p->{N_in} = scalar @{ $p->{genes} };
 		my ($more_corr,$more_var) = "";
-		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist);	
+		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist,$mnd,$mnd_N,$gene_p_type);	
 		%correlation_stack = ( %correlation_stack, %{$more_corr} );
 		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
 		
@@ -1096,103 +1112,177 @@ sub check_overlap {
 }
 
 sub calculate_gene_corr_mat {
+	use CovMatrix;
+	use PDL::LinearAlgebra qw (mchol);
 	my $genes = shift; # ARRAY ref
 	my $gene_data = shift; # HASH ref
 	my $gene_gene_corr = shift; # HASH reaf
 	my $var = shift; # HASH ref
 	my $quick_cor = shift; # 0,1
-	my $max_gene_dist = shift; # integer
+	my $max_gene_dist = shift; # integer	
+	my $mnd= shift; # 0,1
+	my $mnd_N = shift; # integer
+	my $gene_p_type = shift; # 0,1
 
 	my %new_corrs = ();
 	my %new_vars = ();
 
 	# define correlation matrix
 	my $corr = stretcher(ones scalar @$genes); 
-	
-	for (my $i = 0; $i < scalar @$genes; $i++){
-		# get name of gene i
-		my $gn_i = $genes->[$i];
-		# get indexes for its SNPs in the snp correlation matrix
-		my $idx_i = sequence $gene_data->{ $gn_i }->{genotypes}->getdim(1);
-		# get its variance if it has not been calculated already
-		if (not exists $var->{ $gn_i }){
-			$var->{ $gn_i } =  get_genotype_matrix_var($gene_data->{ $gn_i }->{genotypes});
-			$new_vars{ $gn_i } = $var->{ $gn_i };
+	if (defined $mnd){
+		my $G = null;
+		my $genotypes_stack = [];
+		my @mat_gene_idx = ();
+		my $old_end = -1;
+		for (my $i = 0; $i < scalar @$genes; $i++){
+			push @{$genotypes_stack}, $gene_data->{ $genes->[$i] }->{genotypes};		
+			$mat_gene_idx[ $i ]= { 
+									'id' => $genes->[$i], 
+									'start' => $old_end + 1, 
+									'end' =>  $old_end + 1 - 1 + $gene_data->{ $genes->[$i] }->{genotypes}->getdim(1),
+								};
+			$old_end = $mat_gene_idx[ $i ]->{end};
 		}
-		for (my $j = $i; $j < scalar @$genes; $j++){
-			next if ($j == $i); 
-			# get name of gene j
-			my $gn_j = $genes->[$j];
+		$G = $G->glue(1,@$genotypes_stack);
+		my $G_corr = cov_shrink($G->transpose);
+		
+		my ($G_cov,$status) = check_positive_definite($G_corr->{cor},1e-8);
+		if ($status == 1){
+			print "Matrix never positive definite";
+			exit(1);
+		}
+		my $cholesky = mchol($G_cov);
+		my ($sim,$c) = rmnorm($mnd_N,0,$G_cov,$cholesky);
+		
+		my $sim_chi_df1 = $sim**2;
+		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
+		my @null_stats = (); 
+		my %effective_tests = ();
+		my $stats_bag = [];
+		for (my $stat_sim = 0; $stat_sim < $sim_p->getdim(0); $stat_sim++){
+			my $r_p = $sim_p->($stat_sim,)->flat;
+			my  @null_stats = ();
+			foreach my $g (@mat_gene_idx){
+				my $fake_gene = {
+					'pvalues' => $r_p->($g->{start}:$g->{end}),
+					'effect_size' => undef,
+					'effect_size_se' => undef,
+					'cor' => $G_cov->($g->{start}:$g->{end},$g->{start}:$g->{end}),
+					'weights' => ((ones $r_p->($g->{start}:$g->{end})->nelem)/$r_p->($g->{start}:$g->{end})->nelem),
+					'geno_mat_rows' => [ $r_p->($g->{start}:$g->{end})->list ],
+				};
+				my $n_stat = undef;
+				if ($gene_p_type eq 'sidak' or $r_p->($g->{start}:$g->{end})->nelem == 1){
+					
+					if (not defined $effective_tests{ $g->{id} }){
+						$effective_tests{ $g->{id} } = number_effective_tests(\$G_cov->($g->{start}:$g->{end},$g->{start}:$g->{end}));
+					}
+					$n_stat = 1 - (1 - $fake_gene->{'pvalues'}->min)**$effective_tests{ $g->{id} };
+					$n_stat = gsl_cdf_ugaussian_Pinv($n_stat );
+					
+				} elsif ($gene_p_type eq 'fisher'){
+					my ($sim_fisher_chi_stat,$sim_fisher_df) = get_makambi_chi_square_and_df($fake_gene->{cor},$fake_gene->{weights},$fake_gene->{'pvalues'} );
+					my $sim_fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($sim_fisher_chi_stat, $sim_fisher_df );
+					$n_stat = gsl_cdf_ugaussian_Pinv($sim_fisher_p_value);
+				} elsif (($gene_p_type eq 'z_fix') or ($gene_p_type eq 'z_random')){
+					my $sim_z_gene = z_based_gene_pvalues($fake_gene,$mnd);
+					$n_stat = gsl_cdf_ugaussian_Pinv($sim_z_gene->{'Z_P_fix'}) if ($gene_p_type eq 'z_fix');
+					$n_stat = gsl_cdf_ugaussian_Pinv($sim_z_gene->{'Z_P_random'}) if ($gene_p_type eq 'z_random');
+				}
+				push @null_stats, $n_stat;
+			}
+			push @{$stats_bag}, [@null_stats];
+		}
+		$stats_bag = pdl $stats_bag;
+		my $gene_stats_cor = cov_shrink($stats_bag);
+		$corr = $gene_stats_cor->{cor};
+	} else {
+		for (my $i = 0; $i < scalar @$genes; $i++){
+			# get name of gene i
+			my $gn_i = $genes->[$i];
+			
+			# get indexes for its SNPs in the snp correlation matrix
+			my $idx_i = sequence $gene_data->{ $gn_i }->{genotypes}->getdim(1);
+			# get its variance if it has not been calculated already
+			if (not exists $var->{ $gn_i }){
+				$var->{ $gn_i } =  get_genotype_matrix_var($gene_data->{ $gn_i }->{genotypes});
+				$new_vars{ $gn_i } = $var->{ $gn_i };
+			}
+			for (my $j = $i; $j < scalar @$genes; $j++){
+				next if ($j == $i); 
+				# get name of gene j
+				my $gn_j = $genes->[$j];
 
-			# if defined a quick gene-gene correlation the correlation will only be calculate between genes in 
-			# the same chromosome
-			if (not exists $gene_gene_corr->{ $gn_i }{ $gn_j } and defined $quick_cor){
-				# if chromosomes are different set the correlation to 0
-				if ($gene_data->{ $gn_i }->{chr} ne $gene_data->{ $gn_j }->{chr} ) {
-					$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
-					$new_corrs{$gn_j}{$gn_i} = 0;
-				} else { # if are in the same chromosome
-					# if user provided a maximum distance to evaluate correlations	
-					if (defined $max_gene_dist){
-						# if they overlap we will need to calculate the correlation
-						# return 0 from check_overlap mean there is no overlap
-						if (check_overlap($gene_data->{ $gn_i }->{start},$gene_data->{ $gn_i }->{end},check_overlap($gene_data->{ $gn_j }->{start},$gene_data->{ $gn_j }->{end}) == 0 )){
-							
-							# check the distance between the gene coordinates
-							if ( $gene_data->{ $gn_i }->{start} > $gene_data->{ $gn_j }->{end}   ){
-								#		                    start_i.....end_i
-								#		start_j.....end_j
-								if ( ($gene_data->{ $gn_i }->{start} - $gene_data->{ $gn_j }->{end}) > $max_gene_dist * 1000 ){
-									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
-									$new_corrs{$gn_j}{$gn_i} = 0;
+				# if defined a quick gene-gene correlation the correlation will only be calculate between genes in 
+				# the same chromosome
+				if (not exists $gene_gene_corr->{ $gn_i }{ $gn_j } and defined $quick_cor){
+					# if chromosomes are different set the correlation to 0
+					if ($gene_data->{ $gn_i }->{chr} ne $gene_data->{ $gn_j }->{chr} ) {
+						$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+						$new_corrs{$gn_j}{$gn_i} = 0;
+					} else { # if are in the same chromosome
+						# if user provided a maximum distance to evaluate correlations	
+						if (defined $max_gene_dist){
+							# if they overlap we will need to calculate the correlation
+							# return 0 from check_overlap mean there is no overlap
+							if (check_overlap($gene_data->{ $gn_i }->{start},$gene_data->{ $gn_i }->{end},check_overlap($gene_data->{ $gn_j }->{start},$gene_data->{ $gn_j }->{end}) == 0 )){
+								
+								# check the distance between the gene coordinates
+								if ( $gene_data->{ $gn_i }->{start} > $gene_data->{ $gn_j }->{end}   ){
+									#		                    start_i.....end_i
+									#		start_j.....end_j
+									if ( ($gene_data->{ $gn_i }->{start} - $gene_data->{ $gn_j }->{end}) > $max_gene_dist * 1000 ){
+										$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+										$new_corrs{$gn_j}{$gn_i} = 0;
+									}
+								} elsif ( $gene_data->{ $gn_j }->{start} > $gene_data->{ $gn_i }->{end}  ){
+									#		start_i.....end_i
+									#							start_j.....end_j
+									if ( ($gene_data->{ $gn_j }->{start} - $gene_data->{ $gn_i }->{end}) > $max_gene_dist * 1000 ){
+										$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
+										$new_corrs{$gn_j}{$gn_i} = 0;
+									}
 								}
-							} elsif ( $gene_data->{ $gn_j }->{start} > $gene_data->{ $gn_i }->{end}  ){
-								#		start_i.....end_i
-								#							start_j.....end_j
-								if ( ($gene_data->{ $gn_j }->{start} - $gene_data->{ $gn_i }->{end}) > $max_gene_dist * 1000 ){
-									$gene_gene_corr->{ $gn_i }{ $gn_j } = 0;
-									$new_corrs{$gn_j}{$gn_i} = 0;
-								}
+								
 							}
 							
-						}
-						
-					} 
+						} 
+					}
 				}
-			}
-			
-			# next if this correlation was already calculated
-			if (exists $gene_gene_corr->{ $gn_i }{ $gn_j }){
-				set $corr, $i ,$j, $gene_gene_corr->{ $gn_i }{ $gn_j };
-				set $corr, $j ,$i, $gene_gene_corr->{ $gn_i }{ $gn_j };
-				next;
-			}
-			# get indexes for its SNPs in the snp correlation matrix
-			my $idx_j = $gene_data->{ $gn_i }->{genotypes}->getdim(1) + sequence $gene_data->{ $gn_j }->{genotypes}->getdim(1);
-			# get its variance if it has not been calculated already
-			if (not exists $var->{ $gn_j }){
-				$var->{ $gn_j } =  get_genotype_matrix_var($gene_data->{ $gn_j }->{genotypes});
-				$new_vars{ $gn_j } = $var->{ $gn_j };
-			}
-			
-			# combine the genotype data information
-			my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
-			for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
-				my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
+				
+				# next if this correlation was already calculated
+				if (exists $gene_gene_corr->{ $gn_i }{ $gn_j }){
+					set $corr, $i ,$j, $gene_gene_corr->{ $gn_i }{ $gn_j };
+					set $corr, $j ,$i, $gene_gene_corr->{ $gn_i }{ $gn_j };
+					next;
+				}
+				# get indexes for its SNPs in the snp correlation matrix
+				my $idx_j = $gene_data->{ $gn_i }->{genotypes}->getdim(1) + sequence $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+				# get its variance if it has not been calculated already
+				if (not exists $var->{ $gn_j }){
+					$var->{ $gn_j } =  get_genotype_matrix_var($gene_data->{ $gn_j }->{genotypes});
+					$new_vars{ $gn_j } = $var->{ $gn_j };
+				}
+				
+				# combine the genotype data information
+				my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+				for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
+					my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
 
-				for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
-				
-					my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
-					my $c = corr( $genotype_j, $genotype_i );
-					set $r_i_j, $i_snp, $j_snp, $c->sclr;
-				
+					for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
+					
+						my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
+						my $c = corr( $genotype_j, $genotype_i );
+						set $r_i_j, $i_snp, $j_snp, $c->sclr;
+					
+					}
 				}
+				my $c_i_j = double $r_i_j->dsum()/sqrt( $var->{ $gn_i } * $var->{ $gn_j }  );
+				set $corr, $i ,$j, $c_i_j;
+				set $corr, $j ,$i, $c_i_j;
+				
+				$new_corrs{$gn_j}{$gn_i} = $new_corrs{$gn_i}{$gn_j} = $c_i_j;
 			}
-			my $c_i_j = double $r_i_j->dsum()/sqrt( $var->{ $gn_i } * $var->{ $gn_j }  );
-			set $corr, $i ,$j, $c_i_j;
-			set $corr, $j ,$i, $c_i_j;
-			
-			$new_corrs{$gn_j}{$gn_i} = $new_corrs{$gn_i}{$gn_j} = $c_i_j;
 		}
 	}
 	return($corr,\%new_corrs,\%new_vars);

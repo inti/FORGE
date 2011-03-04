@@ -8,6 +8,7 @@ use PDL::NiceSlice;
 use PDL::GSL::CDF;
 use PDL::Stats::Basic;
 use PDL::Ufunc;
+use PDL::LinearAlgebra qw(mchol);
 use Data::Dumper;
 use IO::File;
 use IO::Handle;
@@ -110,8 +111,10 @@ defined $distance or $distance = 20;
 defined $report or $report = 250;
 defined $max_size or $max_size = 99_999_999; 
 defined $min_size or $min_size = 10;
+
 if (defined $mnd){
-	defined $mnd_N or $mnd_N = 1000;
+	defined $mnd_N or $mnd_N = 1_000_000;
+	use Pareto_Distr_Fit qw( Pgpd );
 	if (defined $gene_p_type) {
 		unless (grep $_ eq $gene_p_type, ('sidak','fisher','z_fix','z_random')){
 			print_OUT("I do not recognise the gene p-valyes type entered [ $gene_p_type ]\n");
@@ -697,8 +700,9 @@ if (defined $bfile){
 		my @stats = map { $gene_data{$_}->{stat} } @{ $p->{genes} }; 
 		$p->{stats} = [ @stats ];
 		$p->{N_in} = scalar @{ $p->{genes} };
-		my ($more_corr,$more_var) = "";
-		($p->{gene_cor_mat},$more_corr,$more_var) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist,$mnd,$mnd_N,$gene_p_type);	
+		my ($more_corr,$more_var,$G_cor) = "";
+		($p->{gene_cor_mat},$more_corr,$more_var,$G_cor) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist,$mnd,1000,$gene_p_type);
+		$p->{ genotypes_corr } = ${ $G_cor };
 		%correlation_stack = ( %correlation_stack, %{$more_corr} );
 		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
 		
@@ -738,7 +742,10 @@ if (defined $append){
 	print OUT "name\traw_p\traw_z";
 	
 	if (defined $bfile and defined $snpmap and defined $snp_assoc){
-		print OUT "\tZ_fix\tV_fix\tZ_P_fix\tZ_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";		
+		print OUT "\tZ_fix\tV_fix\tZ_P_fix\tZ_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";
+		if (defined $mnd){
+			print OUT "\tSIM_Z_FIX\tSIM_Z_RANDOM\tSEEN_FIX\tSEEN_RANDOM\tN\tpareto_fix_Phat\tpareto_fix_Phatci_low\tpareto_fix_Phatci_up\tpareto_random_Phat\tpareto_random_Phatci_low\tpareto_random_Phatci_up";			
+		}
 	}
 	if (defined $perm){
 		print OUT ("\tempi_p:$set_stat\tempi_z:$set_stat\tmean_set\tmean_null\tsd_null");
@@ -772,8 +779,9 @@ while (my $p = shift @pathways) {
 		my $var = dsum($p->{gene_cor_mat});
 		my $se = $z->nelem * ones $z->nelem;
 		my $Z_STATS = get_fix_and_radom_meta_analysis($z,$se,undef,$p->{gene_cor_mat});
-		
-		printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e", 
+		my $num = 100;
+		my $simulated_set_stats = simulate_mnd_gene_set($p,$Z_STATS,10,$mnd_N);
+		printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e", 
 			$Z_STATS->{'B_fix'},
 			$Z_STATS->{'V_fix'},
 			$Z_STATS->{'Z_P_fix'},
@@ -784,7 +792,19 @@ while (my $p = shift @pathways) {
 			$Z_STATS->{'Q'},
 			$Z_STATS->{'Q_P'},
 			$Z_STATS->{'tau_squared'},
+			$simulated_set_stats->{'z_fix'},
+			$simulated_set_stats->{'z_random'},
+			$simulated_set_stats->{'seen_fix'},
+			$simulated_set_stats->{'seen_random'},
+			$simulated_set_stats->{'N'},
+			$simulated_set_stats->{'pareto_fix_Phat'},
+			$simulated_set_stats->{'pareto_fix_Phatci_low'},
+			$simulated_set_stats->{'pareto_fix_Phatci_up'},
+			$simulated_set_stats->{'pareto_random_Phat'},
+			$simulated_set_stats->{'pareto_random_Phatci_low'},
+			$simulated_set_stats->{'pareto_random_Phatci_up'},
 		);
+		
 	}
 	
 	if (defined $perm){
@@ -1075,7 +1095,73 @@ if (defined $cgnets or defined $cgnets_all){
 
 print_OUT("Well Done",$LOG);
 exit;
-
+sub simulate_mnd_gene_set {
+	my $gene_set_data = shift; # HASH ref
+	my $set_stats = shift; # HASH ref
+	my $target = shift;
+	my $MAX = shift;
+	
+	my $max_step_size = 10_000;
+	my $total = 0;
+	my $step=100;
+	
+	my $se = $gene_set_data->{gene_cor_mat}->getdim(0) * ones $gene_set_data->{gene_cor_mat}->getdim(0);
+	my $SEEN = zeroes 2;
+	
+	my $cholesky = mchol($gene_set_data->{gene_cor_mat});
+	my $fix_stat = [];
+	my $random_stat = [];
+	while ($SEEN->min < $target){
+		
+		my ($sim,$c) = rmnorm($step,0,$gene_set_data->{gene_cor_mat},$cholesky);
+		my $sim_chi_df1 = $sim**2;
+		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
+		for (my $sim_n = 0; $sim_n < $sim_p->getdim(0); $sim_n++){
+			my $sim_z = flat -1*gsl_cdf_ugaussian_P($sim_p->($sim_n,));
+			my $sim_set_stats = get_fix_and_radom_meta_analysis($sim_z,$se,undef,$gene_set_data->{gene_cor_mat});
+			
+			#print $set_stats->{'Z_P_fix'}," >= ", $sim_set_stats->{'Z_P_fix'}," || ", $set_stats->{'Z_P_random'} ," >= ", $sim_set_stats->{'Z_P_random'},"\n";
+			$SEEN->(0)++ if ( $set_stats->{'Z_P_fix'} >= $sim_set_stats->{'Z_P_fix'} );
+			$SEEN->(1)++ if ( $set_stats->{'Z_P_random'} >= $sim_set_stats->{'Z_P_random'} );
+			push @{$fix_stat}, -1*gsl_cdf_cauchy_Pinv($sim_set_stats->{'Z_P_fix'},1);
+			push @{$random_stat}, -1*gsl_cdf_cauchy_Pinv($sim_set_stats->{'Z_P_random'},1);
+		}
+		$total += $step;
+		
+		if ($SEEN->min != 0){
+			$step = 1.1*(10*($total)/$SEEN->min);
+		} elsif ($step < $max_step_size){ 
+			$step *=10; 
+		}
+		if ($step > $MAX){ $step = $MAX; }
+		last if ($total > $MAX);
+	}
+	
+	my $fix_null_stats = pdl $fix_stat;
+	my $random_null_stats = pdl $random_stat;
+	my $fix_observed = -1*gsl_cdf_cauchy_Pinv($set_stats->{'Z_P_fix'},1);
+	my $random_observed = -1*gsl_cdf_cauchy_Pinv($set_stats->{'Z_P_random'},1);
+	
+	my ($pareto_fix_Phat,$pareto_fix_Phatci_low,$pareto_fix_Phatci_up) = Pareto_Distr_Fit::Pgpd($fix_observed,$fix_null_stats,250,0.05);
+	my ($pareto_random_Phat,$pareto_random_Phatci_low,$pareto_random_Phatci_up) = Pareto_Distr_Fit::Pgpd($random_observed,$random_null_stats,250,0.05);
+	
+	my $back = {
+		'z_fix' => sclr ($SEEN->(0)+1)/($total +1),
+		'z_random' => sclr ($SEEN->(1)+1)/($total +1),
+		'N' => $total,
+	};
+	
+	$back->{'seen_fix'} = sclr $SEEN->(0);
+	$back->{'seen_random'} = sclr $SEEN->(1);
+	$back->{'pareto_fix_Phat'} = sclr $pareto_fix_Phat;
+	$back->{'pareto_fix_Phatci_low'} = $pareto_fix_Phatci_low;
+	$back->{'pareto_fix_Phatci_up'} =  $pareto_fix_Phatci_up;
+	$back->{'pareto_random_Phat'} = sclr $pareto_random_Phat;
+	$back->{'pareto_random_Phatci_low'} =  $pareto_random_Phatci_low;
+	$back->{'pareto_random_Phatci_up'} =  $pareto_random_Phatci_up;
+	
+	return($back);
+}		
 sub print_OUT {
 	my $string = shift;
 	my @file_handles = @_; 	
@@ -1124,9 +1210,8 @@ sub check_overlap {
 	return($back);
 }
 
+
 sub calculate_gene_corr_mat {
-	use CovMatrix;
-	use PDL::LinearAlgebra qw (mchol);
 	my $genes = shift; # ARRAY ref
 	my $gene_data = shift; # HASH ref
 	my $gene_gene_corr = shift; # HASH reaf
@@ -1136,10 +1221,11 @@ sub calculate_gene_corr_mat {
 	my $mnd= shift; # 0,1
 	my $mnd_N = shift; # integer
 	my $gene_p_type = shift; # 0,1
-
+	
 	my %new_corrs = ();
 	my %new_vars = ();
-
+	my $G_cov = ""; # will store the correlation between genotypes.
+	
 	# define correlation matrix
 	my $corr = stretcher(ones scalar @$genes); 
 	if (defined $mnd){
@@ -1150,16 +1236,16 @@ sub calculate_gene_corr_mat {
 		for (my $i = 0; $i < scalar @$genes; $i++){
 			push @{$genotypes_stack}, $gene_data->{ $genes->[$i] }->{genotypes};		
 			$mat_gene_idx[ $i ]= { 
-									'id' => $genes->[$i], 
-									'start' => $old_end + 1, 
-									'end' =>  $old_end + 1 - 1 + $gene_data->{ $genes->[$i] }->{genotypes}->getdim(1),
-								};
+				'id' => $genes->[$i], 
+				'start' => $old_end + 1, 
+				'end' =>  $old_end + 1 - 1 + $gene_data->{ $genes->[$i] }->{genotypes}->getdim(1),
+			};
 			$old_end = $mat_gene_idx[ $i ]->{end};
 		}
 		$G = $G->glue(1,@$genotypes_stack);
 		my $G_corr = cov_shrink($G->transpose);
-		
-		my ($G_cov,$status) = check_positive_definite($G_corr->{cor},1e-8);
+		my $status = undef;
+		($G_cov,$status) = check_positive_definite($G_corr->{cor},1e-8);
 		if ($status == 1){
 			print "Matrix never positive definite";
 			exit(1);
@@ -1225,7 +1311,7 @@ sub calculate_gene_corr_mat {
 				next if ($j == $i); 
 				# get name of gene j
 				my $gn_j = $genes->[$j];
-
+				
 				# if defined a quick gene-gene correlation the correlation will only be calculate between genes in 
 				# the same chromosome
 				if (not exists $gene_gene_corr->{ $gn_i }{ $gn_j } and defined $quick_cor){
@@ -1281,13 +1367,13 @@ sub calculate_gene_corr_mat {
 				my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
 				for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
 					my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
-
-					for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
 					
+					for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
+						
 						my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
 						my $c = corr( $genotype_j, $genotype_i );
 						set $r_i_j, $i_snp, $j_snp, $c->sclr;
-					
+						
 					}
 				}
 				my $c_i_j = double $r_i_j->dsum()/sqrt( $var->{ $gn_i } * $var->{ $gn_j }  );
@@ -1298,8 +1384,10 @@ sub calculate_gene_corr_mat {
 			}
 		}
 	}
-	return($corr,\%new_corrs,\%new_vars);
+	return($corr,\%new_corrs,\%new_vars,\$G_cov);
 }
+
+
 
 
 

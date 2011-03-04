@@ -26,9 +26,12 @@ my @genes = ();
 if (defined $list){
 	print scalar localtime(), "\t", "Reading gene list from [ $list ]\n";
 	open (LIST,$list) or die $!;
-	my @genes = <LIST>;
+	@genes = <LIST>;
 	chomp(@genes);
 	close(LIST);
+	if (scalar @genes < 10){
+		print scalar localtime(), "\t", "   '-> [ @genes ]\n";
+	}
 }
 my %affy_id = ();
 if ( defined $affy_to_rsid ) { # if conversion file is defined
@@ -98,6 +101,9 @@ print scalar localtime(), "\t", "Writting output to [ $out ]\n";
 open (OUT,">$out") or die $!;
 print scalar localtime(), "\t", "Reading SNP to gene mapping files\n";
 
+my %ids = ();
+map { $ids{$_} = "";} @genes;
+
 foreach my $file ( @ARGV ){
 	chomp($file);
 	print scalar localtime(), "\t", "   '-> [ $file ]\n";
@@ -107,11 +113,14 @@ foreach my $file ( @ARGV ){
 		# the line is separate in gene info and snps. the section are separated by a tab.
 		my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
 		if ($m[0] !~ m/:{3}/){ $description .= splice(@m,0,1); }
-		
-		#if (defined $list){
-		#	next unless (grep $_ eq $hugo, @genes);
-		#	next unless (grep $_ eq $ensembl, @genes);
-		#}
+
+		#check if gene was in the list of genes i want to analyze
+		if (scalar (keys %ids) > 0){
+			my $match = 0;
+			$match++ if ( exists $ids{$hugo} );
+			$match++ if ( exists $ids{$ensembl} );			
+			next if ($match == 0);
+		}
 		
 		# get all mapped snps within the distance threshold,
 		my @mapped_snps = ();
@@ -127,8 +136,6 @@ foreach my $file ( @ARGV ){
 		
 		next if (scalar @mapped_snps == 0);
 		# get the gene position info
-		#check if gene was in the list of genes i want to analyze
-# 		next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
 		next if (scalar @mapped_snps == 0);
 		foreach my $snp (@mapped_snps){ 
 			next unless (exists $assoc_data{$snp->{id}});

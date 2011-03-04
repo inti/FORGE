@@ -10,6 +10,9 @@ use PDL::NiceSlice;
 use PDL::Stats::Basic;
 use PDL::Bad;
 use Data::Dumper;
+use Carp qw( confess );
+$SIG{__DIE__} =  \&confess;
+$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;
@@ -90,6 +93,7 @@ if (defined $mnd_sim_wise_correction_methods){
 
 if (defined $mnd){
 	use PDL::LinearAlgebra qw (mchol);
+	use Pareto_Distr_Fit qw (Pgpd);
 	print_OUT("Will run multivariate normal distribution simulations to estimate significance",$LOG);
 	print_OUT("   '-> max number [ $mnd_sim_max ] or until statistic is seen [ $mnd_sim_target ] times",$LOG);
 	my @m = ('sidak','fisher','z_fix','z_random');
@@ -163,9 +167,15 @@ if (not defined $mnd){
 	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 } else {
 	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
-	print $OUT "\tmin_p\tVEGAS\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_fix\tSIM_Z_random";
+	print $OUT "\tmin_p\tVEGAS\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_FIX\tSIM_Z_RANDOM";
 	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 	print $OUT "\tSIM_BEST_P\tSIM_BEST_method\tN_SIM";
+	print $OUT "\tSEEN_VEGAS\tSEEN_SIDAK\tSEEN_FISHER\tSEEN_Z_FIX\tSEEN_RANDOM";
+	print $OUT "\tGPD_VEGAS\tGPD_VEGAS_LOW\tGPD_VEGAS_UP";
+	print $OUT "\tGPD_SIDAK\tGPD_SIDAK_LOW\tGPD_SIDAK_UP";
+	print $OUT "\tGPD_FISHER\tGPD_FISHER_LOW\tGPD_FISHER_UP";
+	print $OUT "\tGPD_Z_FIX\tGPD_Z_FIX_LOW\tGPD_Z_FIX_UP";
+	print $OUT "\tGPD_Z_RANDOM\tGPD_Z_RANDOM_LOW\tGPD_Z_RANDOM_UP";
 	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 }
 
@@ -787,7 +797,29 @@ if (defined $bfile) {
 			  'wise_p' => 'NA',
 			  'wise_method' => 'NA',
 			  'N' => 0,
+			  'seen_vegas'	=> 'NA',
+			  'seen_sidak'	=> 'NA',
+			  'seen_fisher' => 'NA',
+			  'seen_fix' => 'NA',
+			  'seen_random' => 'NA',
+			  'pareto_sidak_Phat' => 'NA',
+			  'pareto_sidak_Phatci_low'  => 'NA',
+			  'pareto_sidak_Phatci_up'	=>  'NA',
+			  'pareto_fisher_Phat' => 'NA',
+			  'pareto_fisher_Phatci_low' => 'NA',
+			  'pareto_fisher_Phatci_up' =>  'NA',
+			  'pareto_fix_Phat'	=> 'NA',
+			  'pareto_fix_Phatci_low' => 'NA',
+			  'pareto_fix_Phatci_up' => 'NA',
+			  'pareto_random_Phat' 	=> 'NA',
+			  'pareto_random_Phatci_low' =>  'NA',
+			  'pareto_random_Phatci_up' =>  'NA',
+			  'pareto_vegas_Phat'		=> 'NA',
+			  'pareto_vegas_Phatci_low' =>  'NA',
+			  'pareto_vegas_Phatci_up'	=> 'NA',
 		  };
+	
+		print "$gene{$gn}->{ensembl}\t$gene{$gn}->{hugo}\n";
 		  if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
 			  $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
 		  }
@@ -805,6 +837,33 @@ if (defined $bfile) {
 			  $simulated_p->{wise_p},
 			  $simulated_p->{wise_method},
 			  $simulated_p->{N},
+		  
+			  $simulated_p->{'seen_vegas'}, # number of times stats was seen
+		      $simulated_p->{'seen_sidak'},
+		      $simulated_p->{'seen_fisher'},
+			  $simulated_p->{'seen_fix'},
+			  $simulated_p->{'seen_random'},
+		  
+			  $simulated_p->{'pareto_vegas_Phat'}, # VEGAS
+			  $simulated_p->{'pareto_vegas_Phatci_low'},
+			  $simulated_p->{'pareto_vegas_Phatci_up'},
+		  
+			  $simulated_p->{'pareto_sidak_Phat'},
+			  $simulated_p->{'pareto_sidak_Phatci_low'},
+			  $simulated_p->{'pareto_sidak_Phatci_up'},
+			  
+			  $simulated_p->{'pareto_fisher_Phat'}, # fisher
+			  $simulated_p->{'pareto_fisher_Phatci_low'},
+			  $simulated_p->{'pareto_fisher_Phatci_up'},
+			  
+			  $simulated_p->{'pareto_fix_Phat'},# z fix
+			  $simulated_p->{'pareto_fix_Phatci_low'},
+			  $simulated_p->{'pareto_fix_Phatci_up'},
+			  
+			  $simulated_p->{'pareto_random_Phat'}, # z random
+			  $simulated_p->{'pareto_random_Phatci_low'},
+			  $simulated_p->{'pareto_random_Phatci_up'},
+				  
 			  $pvalue_based_p->{Meff_Galwey},
 			  $pvalue_based_p->{Meff_gao},
 			  scalar @{ $gene{$gn}->{geno_mat_rows} });
@@ -1020,10 +1079,8 @@ sub simulate_mnd {
 		
 	my $max_step_size = 100_000;
 	my $total = 0;
-	my $step=100;
+	my $step= 1000;
 
-	my $i = 0;
-	
 	my ($cov,$status) = check_positive_definite($gene_data->{cor},1e-8);
 	if ($status == 1){
 		print "Matrix never positive definite $gene_data->{ensembl}\t$gene_data->{hugo}\t",scalar @{$gene_data->{'geno_mat_rows'}},"\n";
@@ -1044,10 +1101,17 @@ sub simulate_mnd {
 
 	my $vegas_stat = dsum gsl_cdf_chisq_Pinv(1-$gene_data->{pvalues},1);
 	my $vegas_count = 0;
+	my $fix_null_stats = [];
+	my $random_null_stats = [];
+	my $sidak_null_stats = [];
+	my $fisher_null_stats = [];
+	my $vegas_null_stats = [];
+	
 	while ($SEEN->min < $target){
 		my ($sim,$c) = rmnorm($step,0,$cov,$cholesky);
 		my $sim_chi_df1 = $sim**2;
 		$vegas_count += dsum( $sim_chi_df1->xchg(0,1)->dsumover >= $vegas_stat);
+		push @{ $vegas_null_stats }, $sim_chi_df1->xchg(0,1)->dsumover->list;
 		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
 		$sim_chi_df1 = '';
 		$sim = '';
@@ -1063,6 +1127,10 @@ sub simulate_mnd {
 			$SEEN->(1)++ if ( $fisher >= $sim_fisher_p_value );
 			$SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
 			$SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
+			push @{ $fix_null_stats    }, -1 * gsl_cdf_gaussian_Pinv( $sim_n_gene_p->{'Z_P_fix'} , 2);
+			push @{ $random_null_stats }, -1 * gsl_cdf_gaussian_Pinv( $sim_n_gene_p->{'Z_P_random'} , 2);
+			push @{ $sidak_null_stats  }, -1 * gsl_cdf_gaussian_Pinv( $sim_sidak , 2 );
+			push @{ $fisher_null_stats }, -1 * gsl_cdf_gaussian_Pinv( $sim_fisher_p_value ,2);
 			
 			my @sim_gene_ps = ( $sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'} );
 			push @{$stats_bag}, [ @sim_gene_ps[ @$compare_wise_p ] ];
@@ -1083,10 +1151,57 @@ sub simulate_mnd {
 		'z_fix' => sclr ($SEEN->(2)+1)/($total +1),
 		'z_random' => sclr ($SEEN->(3)+1)/($total +1),
 		'vegas' => ($vegas_count +1)/($total +1),
-		'wise_p' => undef,
-		'wise_method' => undef,
 		'N' => $total,
 	};
+	
+	$fix_null_stats		= pdl $fix_null_stats;
+	$random_null_stats	= pdl $random_null_stats;
+	$sidak_null_stats	= pdl $sidak_null_stats;
+	$fisher_null_stats	= pdl $fisher_null_stats;
+	$vegas_null_stats	= pdl $vegas_null_stats;
+	
+	my $fix_observed	= -1 * gsl_cdf_gaussian_Pinv( $z_fix	, 2 );
+	my $random_observed = -1 * gsl_cdf_gaussian_Pinv( $z_random , 2 );
+	my $sidak_observed	= -1 * gsl_cdf_gaussian_Pinv( $sidak	, 2 );
+	my $fisher_observed = -1 * gsl_cdf_gaussian_Pinv( $fisher	, 2 );
+
+	my ($pareto_fix_Phat,	$pareto_fix_Phatci_low,		$pareto_fix_Phatci_up)		= Pareto_Distr_Fit::Pgpd( $fix_observed,	$fix_null_stats,	250,0.05);
+	my ($pareto_random_Phat,$pareto_random_Phatci_low,	$pareto_random_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $random_observed,	$random_null_stats,	250,0.05);
+	my ($pareto_sidak_Phat,	$pareto_sidak_Phatci_low,	$pareto_sidak_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $sidak_observed,	$sidak_null_stats,	250,0.05);
+	my ($pareto_fisher_Phat,$pareto_fisher_Phatci_low,	$pareto_fisher_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $fisher_observed,	$fisher_null_stats,	250,0.05);
+	my ($pareto_vegas_Phat,	$pareto_vegas_Phatci_low,	$pareto_vegas_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $vegas_stat,		$vegas_null_stats,	250,0.05);
+	
+	$back->{'seen_vegas'}	= $vegas_count;
+	$back->{'seen_sidak'}	= sclr $SEEN->(0);
+	$back->{'seen_fisher'}	= sclr $SEEN->(1);
+	$back->{'seen_fix'}		= sclr $SEEN->(2);
+	$back->{'seen_random'}	= sclr $SEEN->(3);
+	# pareto p-values
+	# sidak
+	$back->{'pareto_sidak_Phat'}		= sclr $pareto_sidak_Phat;
+	$back->{'pareto_sidak_Phatci_low'}	= $pareto_sidak_Phatci_low;
+	$back->{'pareto_sidak_Phatci_up'}	=  $pareto_sidak_Phatci_up;
+	
+	# fisher
+	$back->{'pareto_fisher_Phat'}		= sclr $pareto_fisher_Phat;
+	$back->{'pareto_fisher_Phatci_low'}	= $pareto_fisher_Phatci_low;
+	$back->{'pareto_fisher_Phatci_up'}	=  $pareto_fisher_Phatci_up;
+		
+	# fix
+	$back->{'pareto_fix_Phat'}			= sclr $pareto_fix_Phat;
+	$back->{'pareto_fix_Phatci_low'}	= $pareto_fix_Phatci_low;
+	$back->{'pareto_fix_Phatci_up'}		=  $pareto_fix_Phatci_up;
+	
+	# random
+	$back->{'pareto_random_Phat'}		= sclr $pareto_random_Phat;
+	$back->{'pareto_random_Phatci_low'} =  $pareto_random_Phatci_low;
+	$back->{'pareto_random_Phatci_up'}	=  $pareto_random_Phatci_up;
+	
+	# vegas
+	$back->{'pareto_vegas_Phat'}		= sclr $pareto_vegas_Phat;
+	$back->{'pareto_vegas_Phatci_low'} =  $pareto_vegas_Phatci_low;
+	$back->{'pareto_vegas_Phatci_up'}	=  $pareto_vegas_Phatci_up;
+	
 	my @methods = ('sidak','fisher','z_fix','z_random');
 	@methods = @methods[@$compare_wise_p];
 	my $methods_p = pdl ($back->{sidak},$back->{fisher},$back->{z_fix},$back->{z_random});
@@ -1099,7 +1214,7 @@ sub simulate_mnd {
 	$back->{'wise_p'} = sclr 1 - ( 1 - $methods_p->( $min ) )**$stats_Meff_gao;
 	$back->{'wise_method'} = $methods[$min];
 	$back->{'stats_gao'} = $stats_Meff_gao;
-	return( $back );	
+	return( $back );
 }
 
 	

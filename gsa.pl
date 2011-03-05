@@ -1123,8 +1123,8 @@ sub simulate_mnd_gene_set {
 			#print $set_stats->{'Z_P_fix'}," >= ", $sim_set_stats->{'Z_P_fix'}," || ", $set_stats->{'Z_P_random'} ," >= ", $sim_set_stats->{'Z_P_random'},"\n";
 			$SEEN->(0)++ if ( $set_stats->{'Z_P_fix'} >= $sim_set_stats->{'Z_P_fix'} );
 			$SEEN->(1)++ if ( $set_stats->{'Z_P_random'} >= $sim_set_stats->{'Z_P_random'} );
-			push @{$fix_stat}, -1*gsl_cdf_gaussian_Pinv($sim_set_stats->{'Z_P_fix'},2);
-			push @{$random_stat}, -1*gsl_cdf_gaussian_Pinv($sim_set_stats->{'Z_P_random'},2);
+			push @{$fix_stat}, -1*gsl_cdf_ugaussian_Pinv($sim_set_stats->{'Z_P_fix'});
+			push @{$random_stat}, -1*gsl_cdf_ugaussian_Pinv($sim_set_stats->{'Z_P_random'});
 		}
 		$total += $step;
 		
@@ -1139,8 +1139,8 @@ sub simulate_mnd_gene_set {
 	
 	my $fix_null_stats = pdl $fix_stat;
 	my $random_null_stats = pdl $random_stat;
-	my $fix_observed = -1*gsl_cdf_gaussian_Pinv($set_stats->{'Z_P_fix'},2);
-	my $random_observed = -1*gsl_cdf_gaussian_Pinv($set_stats->{'Z_P_random'},2);
+	my $fix_observed = -1*gsl_cdf_ugaussian_Pinv($set_stats->{'Z_P_fix'});
+	my $random_observed = -1*gsl_cdf_ugaussian_Pinv($set_stats->{'Z_P_random'});
 	
 	my ($pareto_fix_Phat,$pareto_fix_Phatci_low,$pareto_fix_Phatci_up) = Pareto_Distr_Fit::Pgpd($fix_observed,$fix_null_stats,250,0.05);
 	my ($pareto_random_Phat,$pareto_random_Phatci_low,$pareto_random_Phatci_up) = Pareto_Distr_Fit::Pgpd($random_observed,$random_null_stats,250,0.05);

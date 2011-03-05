@@ -1127,10 +1127,10 @@ sub simulate_mnd {
 			$SEEN->(1)++ if ( $fisher >= $sim_fisher_p_value );
 			$SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
 			$SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
-			push @{ $fix_null_stats    }, -1 * gsl_cdf_gaussian_Pinv( $sim_n_gene_p->{'Z_P_fix'} , 2);
-			push @{ $random_null_stats }, -1 * gsl_cdf_gaussian_Pinv( $sim_n_gene_p->{'Z_P_random'} , 2);
-			push @{ $sidak_null_stats  }, -1 * gsl_cdf_gaussian_Pinv( $sim_sidak , 2 );
-			push @{ $fisher_null_stats }, -1 * gsl_cdf_gaussian_Pinv( $sim_fisher_p_value ,2);
+			push @{ $fix_null_stats    }, -1 * gsl_cdf_ugaussian_Pinv( $sim_n_gene_p->{'Z_P_fix'} );
+			push @{ $random_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_n_gene_p->{'Z_P_random'} );
+			push @{ $sidak_null_stats  }, -1 * gsl_cdf_ugaussian_Pinv( $sim_sidak );
+			push @{ $fisher_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_fisher_p_value );
 			
 			my @sim_gene_ps = ( $sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'} );
 			push @{$stats_bag}, [ @sim_gene_ps[ @$compare_wise_p ] ];
@@ -1160,10 +1160,10 @@ sub simulate_mnd {
 	$fisher_null_stats	= pdl $fisher_null_stats;
 	$vegas_null_stats	= pdl $vegas_null_stats;
 	
-	my $fix_observed	= -1 * gsl_cdf_gaussian_Pinv( $z_fix	, 2 );
-	my $random_observed = -1 * gsl_cdf_gaussian_Pinv( $z_random , 2 );
-	my $sidak_observed	= -1 * gsl_cdf_gaussian_Pinv( $sidak	, 2 );
-	my $fisher_observed = -1 * gsl_cdf_gaussian_Pinv( $fisher	, 2 );
+	my $fix_observed	= -1 * gsl_cdf_ugaussian_Pinv( $z_fix );
+	my $random_observed = -1 * gsl_cdf_ugaussian_Pinv( $z_random );
+	my $sidak_observed	= -1 * gsl_cdf_ugaussian_Pinv( $sidak );
+	my $fisher_observed = -1 * gsl_cdf_ugaussian_Pinv( $fisher );
 
 	my ($pareto_fix_Phat,	$pareto_fix_Phatci_low,		$pareto_fix_Phatci_up)		= Pareto_Distr_Fit::Pgpd( $fix_observed,	$fix_null_stats,	250,0.05);
 	my ($pareto_random_Phat,$pareto_random_Phatci_low,	$pareto_random_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $random_observed,	$random_null_stats,	250,0.05);

@@ -8,6 +8,7 @@ use PDL::GSL::CDF;
 use PDL::Stats::Basic;
 use PDL::Stats::Distr;
 use PDL::LinearAlgebra qw(mchol);
+use PDL::GSL::INTERP;
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
@@ -35,7 +36,7 @@ sub Pgpd {
 	my $alpha = shift;
 	my $N = $y->nelem;
 	my $Padth = 0.05;
-	
+
 	if ($Nexc >= $N-1) {
 		$Nexc = int(0.1*$N);
 	}
@@ -54,8 +55,8 @@ sub Pgpd {
 		$frac = $Nexc/$N;
 		# Fitting the tail and computing the Pvalue
 		($a,$k,$cov) = Jin_ZHANG_pareto_fit($z);
-		#print "$a $k $cov\n";
-		my $p = 1 - gsl_cdf_pareto_P($z,$a,$k);
+		#print "$Nexc $a $k $cov\n";
+		my $p = 1- gsl_cdf_pareto_P($z,$a,$k);
 		($PW2_less_005,$PA2_less_005,$W2,$A2) = gpdgoft( $p ,$k); # goodness-of-fit test
 		#print "$PW2_less_005,$PA2_less_005,$W2,$A2\n";
 		
@@ -66,16 +67,14 @@ sub Pgpd {
 		}
 		$Nexc -= 10;
 	} until ( ( $fitted == 1 ) or ($Nexc < 11) );	
-	if ($Nexc < 10){
-		print "did not converged\n";
-		getc;
-		return(-1,-1,-1);
-	} else {
+	if ($fitted == 1){
 		my ($Phat,$Phatci_low,$Phatci_up) = gpdPval($x0-$t,$a,$k,$cov,$alpha);
 		$Phat = $frac*$Phat;
 		$Phatci_up = $frac*$Phatci_up;
 		$Phatci_low =$frac*$Phatci_low; 
 		return($Phat,$Phatci_low,$Phatci_up);
+	} else {
+		return(-1,-1,-1);
 	}
 }
 
@@ -183,40 +182,38 @@ sub gpdgoft{
 	my $k_vals = pdl (-0.9,-0.5,-0.2,-0.1,0,0.1,0.2,0.3,0.4,0.5);
 	my $W2_vals  = pdl (0.115,0.124,0.137,0.114,0.153,0.16,0.171,0.184,0.201,0.222);
 	my $A2_vals = pdl (0.771,0.83,0.903,0.935,0.974,1.02,1.074,1.14,1.221,1.321);
-
-	if ($k < -0.9) {
-		$A2_less_005 = 1 if ( $A2 >= 0.771);
-		$W2_less_005 = 1 if ( $W2 >= 0.115);
-	} elsif ( $k == 0.5) {
-		$A2_less_005 = 1 if ( $A2 >= 1.321);
-		$W2_less_005 = 1 if ( $W2 >= 0.222);			
+	
+	my $trend_A2 =  PDL::GSL::INTERP->init('linear',$k_vals,$A2_vals);
+	my $trend_W2 =  PDL::GSL::INTERP->init('linear',$k_vals,$W2_vals);
+	
+	
+	my $critic_w2 = undef;
+	my $critic_a2 = undef;
+	
+	if ($k < -0.9 or $k > 0.5) {
+		$critic_w2 = $trend_W2->eval($k,{ Extrapolate => 1 } );
+		$critic_a2 = $trend_A2->eval($k,{ Extrapolate => 1 } );
 	} else {
-		my $critic_w2 = undef;
-		my $critic_a2 = undef;
-		for (my $i = 0; $i < $k_vals->nelem - 1; $i++ ){
-			if ( (  $k >= $k_vals->($i) ) and ( $k_vals->($i + 1) >= $k ) ){
-				$critic_w2 = (  ( $k_vals->($i + 1)-$k_vals->($i) )/($W2_vals->($i + 1) - $W2_vals->($i) )   )*$k + $W2_vals->($i + 1);
-				$critic_a2 = (  ( $k_vals->($i + 1)-$k_vals->($i) )/($A2_vals->($i + 1) - $A2_vals->($i) )   )*$k + $A2_vals->($i + 1);
-			}
-		}
-		$A2_less_005 = 1 if ( $A2 >= $critic_a2);
-		$W2_less_005 = 1 if ( $W2 >= $critic_w2);
+		$critic_w2 = $trend_W2->eval($k,{ Extrapolate => 0 } );
+		$critic_a2 = $trend_A2->eval($k,{ Extrapolate => 0 } );
 	}
+
+	$A2_less_005 = 1 if ( $A2 >= $critic_a2 );
+	$W2_less_005 = 1 if ( $W2 >= $critic_w2 );
+	
 	return($A2_less_005,$W2_less_005,$W2,$A2);
 }
 
 sub fit_stats { 
 	my $p = shift;
 	my $n = $p->nelem;
-	my $i = 1 + flat sequence 1, $n;
+	my $i = 1 + sequence $n;
+	
 	# Cramer-von Mises statistic
 	my $W2 = dsum( ($p - ( (2*$i-1)/(2*$n) ))^2 ) + 1/(12*$n);
 	# Anderson Darling statistic
 	my $A2 = -$n -  (1/$n) * dsum( ((2*$i-1) * (log($p)) + log(double 1 - double $p->($n+1-$i - 1)) ));
-
 	return($W2,$A2);
 }
-
-
 
 1;

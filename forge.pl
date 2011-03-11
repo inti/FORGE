@@ -1160,30 +1160,114 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 							'tau_squared' => "NA",
 							'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
 						};
-					}
-					
+					} 
 					my $pvalue_based_p = gene_pvalue($gn);
 					
-					print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
-					$gene{$gn}->{pvalues}->min,
-					$pvalue_based_p->{sidak_min_p},
-					$pvalue_based_p->{fisher},
-					$pvalue_based_p->{fisher_chi},
-					$pvalue_based_p->{fisher_df},
-					$z_based_p->{'B_fix'},
-					$z_based_p->{'V_fix'},
-					$z_based_p->{'Z_P_fix'},
-					$z_based_p->{'B_random'},
-					$z_based_p->{'V_random'},
-					$z_based_p->{'Z_P_random'},
-					$z_based_p->{'I2'},
-					$z_based_p->{'Q'},
-					$z_based_p->{'Q_P'},
-					$z_based_p->{'tau_squared'},
-					$pvalue_based_p->{Meff_Galwey},
-					$pvalue_based_p->{Meff_gao},
-					scalar @{ $gene{$gn}->{geno_mat_rows} });
-					print $OUT "\n";
+					# check which analysis strategy to follow 
+					if (not defined $mnd){ # asymptotic 
+						print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+						$gene{$gn}->{pvalues}->min,
+						$pvalue_based_p->{sidak_min_p},
+						$pvalue_based_p->{fisher},
+						$pvalue_based_p->{fisher_chi},
+						$pvalue_based_p->{fisher_df},
+						$z_based_p->{'B_fix'},
+						$z_based_p->{'V_fix'},
+						$z_based_p->{'Z_P_fix'},
+						$z_based_p->{'B_random'},
+						$z_based_p->{'V_random'},
+						$z_based_p->{'Z_P_random'},
+						$z_based_p->{'I2'},
+						$z_based_p->{'Q'},
+						$z_based_p->{'Q_P'},
+						$z_based_p->{'tau_squared'},
+						$pvalue_based_p->{Meff_Galwey},
+						$pvalue_based_p->{Meff_gao},
+						scalar @{ $gene{$gn}->{geno_mat_rows} });
+						print $OUT "\n";
+					} else { # MND Sampling
+						my $simulated_p = {
+							'sidak' => 'NA',
+							'fisher' => 'NA',
+							'z_fix' => 'NA',
+							'z_random' => 'NA',
+							'vegas' => 'NA',
+							'wise_p' => 'NA',
+							'wise_method' => 'NA',
+							'N' => 0,
+							'seen_vegas'	=> 'NA',
+							'seen_sidak'	=> 'NA',
+							'seen_fisher' => 'NA',
+							'seen_fix' => 'NA',
+							'seen_random' => 'NA',
+							'pareto_sidak_Phat' => 'NA',
+							'pareto_sidak_Phatci_low'  => 'NA',
+							'pareto_sidak_Phatci_up'	=>  'NA',
+							'pareto_fisher_Phat' => 'NA',
+							'pareto_fisher_Phatci_low' => 'NA',
+							'pareto_fisher_Phatci_up' =>  'NA',
+							'pareto_fix_Phat'	=> 'NA',
+							'pareto_fix_Phatci_low' => 'NA',
+							'pareto_fix_Phatci_up' => 'NA',
+							'pareto_random_Phat' 	=> 'NA',
+							'pareto_random_Phatci_low' =>  'NA',
+							'pareto_random_Phatci_up' =>  'NA',
+							'pareto_vegas_Phat'		=> 'NA',
+							'pareto_vegas_Phatci_low' =>  'NA',
+							'pareto_vegas_Phatci_up'	=> 'NA',
+						};
+						
+						if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
+							$simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
+						}
+						
+						print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+						$gene{$gn}->{pvalues}->min,
+						$simulated_p->{vegas},
+						$simulated_p->{sidak},
+						$simulated_p->{fisher},
+						$simulated_p->{z_fix},
+						$simulated_p->{z_random},
+						$z_based_p->{'I2'},
+						$z_based_p->{'Q'},
+						$z_based_p->{'Q_P'},
+						$z_based_p->{'tau_squared'},
+						$simulated_p->{wise_p},
+						$simulated_p->{wise_method},
+						$simulated_p->{N},
+						
+						$simulated_p->{'seen_vegas'}, # number of times stats was seen
+						$simulated_p->{'seen_sidak'},
+						$simulated_p->{'seen_fisher'},
+						$simulated_p->{'seen_fix'},
+						$simulated_p->{'seen_random'},
+						
+						$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
+						$simulated_p->{'pareto_vegas_Phatci_low'},
+						$simulated_p->{'pareto_vegas_Phatci_up'},
+						
+						$simulated_p->{'pareto_sidak_Phat'},
+						$simulated_p->{'pareto_sidak_Phatci_low'},
+						$simulated_p->{'pareto_sidak_Phatci_up'},
+						
+						$simulated_p->{'pareto_fisher_Phat'}, # fisher
+						$simulated_p->{'pareto_fisher_Phatci_low'},
+						$simulated_p->{'pareto_fisher_Phatci_up'},
+						
+						$simulated_p->{'pareto_fix_Phat'},# z fix
+						$simulated_p->{'pareto_fix_Phatci_low'},
+						$simulated_p->{'pareto_fix_Phatci_up'},
+						
+						$simulated_p->{'pareto_random_Phat'}, # z random
+						$simulated_p->{'pareto_random_Phatci_low'},
+						$simulated_p->{'pareto_random_Phatci_up'},
+						
+						$pvalue_based_p->{Meff_Galwey},
+						$pvalue_based_p->{Meff_gao},
+						scalar @{ $gene{$gn}->{geno_mat_rows} });
+						print $OUT "\n";
+					}
+					
 					# remove LD measures and genotypes from the stack that will not use again to free memory
 					foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
 						if (scalar @{ $snp_to_gene{ $snp } } == 1){
@@ -1680,6 +1764,8 @@ script [options]
 	-ped			Genotype file in PLINK PED format
 	-map			SNP info file in PLINK MAP format
 	-bfile			Files in PLINK binary format, corresping file with extension *.bed, *.bim and *.fam.
+	-ox_gprobs      Genotype probabilities in OXFORD format.
+	-bgl_gprobs		Genotype probabilities in BEAGLE format.
 	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
 	-snpmap, -m		Snp-to-gene mapping file
 	-affy_to_rsid		Affy id to rs id mapping file
@@ -1704,6 +1790,7 @@ script [options]
 	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
 	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2
 	-gmt_max_size		Max number of genes in gene-sets to be analysed. default = 999999999
+	-g_prob_threshold	Floating number. Genotype probabilites below this threshold will be set to missing
  
 	Multivariate Normal Distribution sampling
 	-mnd			Estimate significance by sampling from a multivatiate normal distribution
@@ -1749,6 +1836,16 @@ SNP info file in PLINK MAP format
 =item B<-bfile>
 
 Files in PLINK binary format, with extension *.bed, *.bim and *.fam.
+
+=item B<-ox_gprobs>
+
+File with genotype probabilities in OXFORD format. See http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format_new.html for details in the file format. An example is
+1	rs10489629	67400370 2 4 1 0 0 0 1 0 1 0 0
+Columns are chromosome, SNP id, SNP position, minor alelle (A), major alelle (B), prob for AA at sample1,  prob for AB at sample1,  prob for BB at sample1, prob for AA at sample2, etc.
+
+=item B<-bgl_gprobs>
+
+Genotype probabilities in BEAGLE format. Please see http://faculty.washington.edu/browning/beagle/beagle.html for details on the format
  
 =item B<-assoc, -a>
  
@@ -1837,6 +1934,11 @@ Min number of genes in gene-sets to be analysed. default = 2
 =item B<-gmt_max_size>
  
 Max number of genes in gene-sets to be analysed. default = 999999999
+
+=item B<-g_prob_threshold>
+
+Floating number. Genotype probabilites below this threshold will be set to missing
+
  
 =item B<-mnd>
  

@@ -84,7 +84,7 @@ $LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$
 print_OUT("Check http://github.com/inti/FORGE/wiki for updates",$LOG);
 print_OUT("LOG file will be written to [ $out.log ]",$LOG);
 
-# define parameter for mnd simulation
+# define parameters for mnd simulation
 defined $mnd_sim_target or $mnd_sim_target = 10;
 defined $mnd_sim_max or $mnd_sim_max = 100_000;
 if (defined $mnd_sim_wise_correction_methods){
@@ -105,7 +105,7 @@ if (defined $mnd){
 defined $gmt_min_size or $gmt_min_size = 2;
 defined $gmt_max_size or $gmt_max_size = 999_999_999;
 
-# define distance threshold,
+# flush output every $flush number of genes are ready 
 defined $flush or $flush = 1000;
 
 # define distance threshold,
@@ -127,8 +127,10 @@ defined $out or $out = "gene_based_fisher_v041.OUT";
 # tell if user wants to correct p-values by genomic control 
 if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]",$LOG);}
 
+# define option to read genotype probability files
 my $geno_probs = undef;
 my $geno_probs_format = undef;
+# find out which format the file is with the command line options
 if (defined $ox_gprobs) {
     $geno_probs = $ox_gprobs ;
 	$geno_probs_format = 'OXFORD';
@@ -139,6 +141,8 @@ if (defined $ox_gprobs) {
     print_OUT("Genotype probabilities in BEAGLE format will be read from [ $geno_probs ]",$LOG);
 }
 
+# generate an index of the genotype probability files
+# this speads up the IO
 my ($gprobs, $gprobs_index);
 if (defined $geno_probs){
     $gprobs = IO::File->new();
@@ -156,16 +160,18 @@ if (defined $geno_probs){
     }
 } 
 
+# print header for output file
 my $OUT = new IO::File; 
 $OUT->open(">$out") or print_OUT("I can not open [ $out ] to write to",$LOG) and exit(1);
 
+# header for MND sampling analysis
 if (not defined $mnd){
 	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
 	print $OUT "\tmin_p\tmin_p_SIDAK\tFISHER\tFISHER_chi-square\tFISHER_df";
 	print $OUT "\tB_fix\tVar_fix\tB_P_fix\tB_random\tVar_random\tB_P_random";
 	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
-} else {
+} else { # header for asymptotic analysis
 	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
 	print $OUT "\tmin_p\tVEGAS\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_FIX\tSIM_Z_RANDOM";
 	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
@@ -494,11 +500,13 @@ print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes read from SNP-2-Gene Mappi
 print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed",$LOG);
 
 
+# complain if there is genes ledt for analysis
 if (scalar keys %gene == 0){
         print_OUT("No genes mapped",$LOG);
         exit(1);
 }
 
+# read gene-set definition file
 if (defined $gmt){
 	my $total_gene_sets=0;
 	print_OUT("Reading gene-set definitions",$LOG);
@@ -536,7 +544,7 @@ if (defined $gmt){
 			my %tmp = ();
 			map { $tmp{$_} = ""; } @gene_with_snp;
 			@gene_with_snp = keys %tmp; 
-						
+			# skip gene-set if does not complain with size constrains			
 			next if (scalar @gene_with_snp < $gmt_min_size);
 			next if (scalar @gene_with_snp > $gmt_max_size);
 			
@@ -584,7 +592,7 @@ if (defined $gmt){
 	print_OUT("  '-> Just read [ $total_gene_sets ] gene-sets with mapped genes with size [ $gmt_min_size ] and [ $gmt_max_size ]",$LOG);
 }
 
-
+# exclude genes if gene type were specified
 if (defined $exclude_gene_type or defined $include_gene_type){
 	print_OUT("Going to filter genes based on user defined options",$LOG);
 	if (defined $exclude_gene_type){
@@ -660,9 +668,208 @@ unless (scalar keys %gene < 100){
   $report = int((scalar keys %gene)/100 + 0.5)*10;
 }
 
+# the genotype stack will store SNP genotypes if the SNP was mapped to more than 1 gene.
+# the SNP genotype will be deleted after is no longer needed.
+# this reduces the IO and speeds up
 my %snp_genotype_stack = ();
 
-if (defined $bfile) {
+
+# if user defined a genotypes file. read genotypes and store a genotype matrix (rows: samples, cols: genotypes)for each gene 
+if (defined $geno_probs) { # in case not plink binary files provided and only a genotype prob file is given
+	print_OUT("Reading genotype probabilities from [ $geno_probs ]",$LOG);
+	foreach my $gn (keys %gene){
+		my $snp_list = [];
+		my $lines = [];
+		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
+			next if (not exists $assoc_data{ $bim[$bim_ids{$mapped_snp}]->{snp_id} } );
+			if (defined $v){ print_OUT("Adding SNP [  $bim[ $bim_ids{$mapped_snp} ]->{snp_id}  ] to genotypes of $gn",$LOG); }
+			push @{$snp_list}, $mapped_snp;
+			push @{$gene{$gn}->{geno_mat_rows}}, $mapped_snp;
+			push @{$gene{$gn}->{pvalues}}, $assoc_data{ $mapped_snp }->{pvalue};
+			push @{$lines}, $bim_ids{$mapped_snp} + 1;
+		}
+		my ($p_mat,$d_mat) = extract_genotypes_for_snp_list($snp_list,$lines,$g_prob_threshold,$geno_probs_format,$gprobs,$gprobs_index);
+		$gene{$gn}->{genotypes} = $d_mat;
+		# check the range of the values. if the range is 0 then the SNP is monomorphic and shoudl be dropped
+		my ($min,$max,$min_d,$max_d)= $gene{$gn}->{genotypes}->minmaximum;
+		my $non_zero_variance_index = which(($max - $min) != 0);
+		# check if any SNPs needs to be dropped
+		if ($non_zero_variance_index->isempty()){
+			print_OUT(" [ $gn ] All SNPs are monomorphic, going to next gene",$LOG) if (defined $v);
+			next;
+		}
+		my $old_size = scalar @{ $gene{$gn}->{geno_mat_rows} };
+		my $new_size = scalar list $non_zero_variance_index;
+		if ( $old_size != $new_size){
+			$gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->(,$non_zero_variance_index);
+			$gene{$gn}->{geno_mat_rows} = [@{$gene{$gn}->{geno_mat_rows}}[$non_zero_variance_index->flat->list] ];
+			$gene{$gn}->{pvalues} = [@{$gene{$gn}->{pvalues}}[$non_zero_variance_index->flat->list] ];
+			if (defined $v){
+				my $diff = $old_size - $new_size;
+				print_OUT("Dropping [ $diff ] monomorphic SNPs",$LOG);
+			}
+		}
+		
+		# Calculate the genotypes correlation matrix
+		my $more_corrs = "";
+		($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);
+		%correlation = (%correlation,%{$more_corrs});
+		
+		# Calculate the weights for the gene
+		$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
+		
+		# Calculate average max genotype prob and use it as weitghs
+		$gene{$gn}->{weights} *= daverage $gene{$gn}->{genotypes};
+		$gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+		
+		# calculate gene p-values
+		my $z_based_p = z_based_gene_pvalues($gene{$gn},$mnd);
+		if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
+			$z_based_p = {
+				'B_stouffer_fix' => "NA",
+				'B_stouffer_random' => "NA",
+				'B_fix' => "NA",
+				'B_random' => "NA",
+				'V_fix' => "NA",
+				'V_random' => "NA",
+				'Chi_fix' => "NA",
+				'Chi_random' => "NA",
+				'Z_P_fix' => "NA",
+				'Z_P_random' => "NA",
+				'Q' => "NA",
+				'Q_P' => "NA",
+				'I2' => "NA",
+				'tau_squared' => "NA",
+				'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
+			};
+		} 
+		my $pvalue_based_p = gene_pvalue($gn);
+		
+		# check which analysis strategy to follow 
+		if (not defined $mnd){ # asymptotic 
+			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$pvalue_based_p->{sidak_min_p},
+			$pvalue_based_p->{fisher},
+			$pvalue_based_p->{fisher_chi},
+			$pvalue_based_p->{fisher_df},
+			$z_based_p->{'B_fix'},
+			$z_based_p->{'V_fix'},
+			$z_based_p->{'Z_P_fix'},
+			$z_based_p->{'B_random'},
+			$z_based_p->{'V_random'},
+			$z_based_p->{'Z_P_random'},
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			$z_based_p->{'Q_P'},
+			$z_based_p->{'tau_squared'},
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
+			print $OUT "\n";
+		} else { # MND Sampling
+			my $simulated_p = {
+				'sidak' => 'NA',
+				'fisher' => 'NA',
+				'z_fix' => 'NA',
+				'z_random' => 'NA',
+				'vegas' => 'NA',
+				'wise_p' => 'NA',
+				'wise_method' => 'NA',
+				'N' => 0,
+				'seen_vegas'	=> 'NA',
+				'seen_sidak'	=> 'NA',
+				'seen_fisher' => 'NA',
+				'seen_fix' => 'NA',
+				'seen_random' => 'NA',
+				'pareto_sidak_Phat' => 'NA',
+				'pareto_sidak_Phatci_low'  => 'NA',
+				'pareto_sidak_Phatci_up'	=>  'NA',
+				'pareto_fisher_Phat' => 'NA',
+				'pareto_fisher_Phatci_low' => 'NA',
+				'pareto_fisher_Phatci_up' =>  'NA',
+				'pareto_fix_Phat'	=> 'NA',
+				'pareto_fix_Phatci_low' => 'NA',
+				'pareto_fix_Phatci_up' => 'NA',
+				'pareto_random_Phat' 	=> 'NA',
+				'pareto_random_Phatci_low' =>  'NA',
+				'pareto_random_Phatci_up' =>  'NA',
+				'pareto_vegas_Phat'		=> 'NA',
+				'pareto_vegas_Phatci_low' =>  'NA',
+				'pareto_vegas_Phatci_up'	=> 'NA',
+			};
+			
+			if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
+				$simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
+			}
+			
+			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$simulated_p->{vegas},
+			$simulated_p->{sidak},
+			$simulated_p->{fisher},
+			$simulated_p->{z_fix},
+			$simulated_p->{z_random},
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			$z_based_p->{'Q_P'},
+			$z_based_p->{'tau_squared'},
+			$simulated_p->{wise_p},
+			$simulated_p->{wise_method},
+			$simulated_p->{N},
+			
+			$simulated_p->{'seen_vegas'}, # number of times stats was seen
+			$simulated_p->{'seen_sidak'},
+			$simulated_p->{'seen_fisher'},
+			$simulated_p->{'seen_fix'},
+			$simulated_p->{'seen_random'},
+			
+			$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
+			$simulated_p->{'pareto_vegas_Phatci_low'},
+			$simulated_p->{'pareto_vegas_Phatci_up'},
+			
+			$simulated_p->{'pareto_sidak_Phat'},
+			$simulated_p->{'pareto_sidak_Phatci_low'},
+			$simulated_p->{'pareto_sidak_Phatci_up'},
+			
+			$simulated_p->{'pareto_fisher_Phat'}, # fisher
+			$simulated_p->{'pareto_fisher_Phatci_low'},
+			$simulated_p->{'pareto_fisher_Phatci_up'},
+			
+			$simulated_p->{'pareto_fix_Phat'},# z fix
+			$simulated_p->{'pareto_fix_Phatci_low'},
+			$simulated_p->{'pareto_fix_Phatci_up'},
+			
+			$simulated_p->{'pareto_random_Phat'}, # z random
+			$simulated_p->{'pareto_random_Phatci_low'},
+			$simulated_p->{'pareto_random_Phatci_up'},
+			
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
+			print $OUT "\n";
+		}
+		
+		# remove LD measures and genotypes from the stack that will not use again to free memory
+		foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
+			if (scalar @{ $snp_to_gene{ $snp } } == 1){
+				foreach my $pair ( keys %{$correlation{$snp}}){
+					delete($correlation{$snp}{$pair});
+					delete($correlation{$pair}{$snp});
+				}
+				delete($snp_genotype_stack{ $snp });
+				delete($snp_to_gene{ $snp });
+			} else {
+				splice(@{ $snp_to_gene{ $snp } },0,1);
+			}
+		}
+		# delete the gene's data to keep memory usage low
+		delete($gene{$gn});
+		$count++;
+		&report_advance($count,$report,"Genes");	
+		
+	}
+} elsif (defined $bfile) {
   print_OUT("Reading genotypes from [ $bfile.bed ]",$LOG);
   # open genotype file
   my $bed = new IO::File;
@@ -765,8 +972,9 @@ if (defined $bfile) {
 		};
 	} 
 	my $pvalue_based_p = gene_pvalue($gn);
-	  
-	if (not defined $mnd){
+	
+	# check which analysis strategy to follow 
+	if (not defined $mnd){ # asymptotic 
 		print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 			$gene{$gn}->{pvalues}->min,
 			$pvalue_based_p->{sidak_min_p},
@@ -787,89 +995,89 @@ if (defined $bfile) {
 			$pvalue_based_p->{Meff_gao},
 			scalar @{ $gene{$gn}->{geno_mat_rows} });
 			print $OUT "\n";
-	  } else {
-		  my $simulated_p = {
-			  'sidak' => 'NA',
-			  'fisher' => 'NA',
-			  'z_fix' => 'NA',
-			  'z_random' => 'NA',
-			  'vegas' => 'NA',
-			  'wise_p' => 'NA',
-			  'wise_method' => 'NA',
-			  'N' => 0,
-			  'seen_vegas'	=> 'NA',
-			  'seen_sidak'	=> 'NA',
-			  'seen_fisher' => 'NA',
-			  'seen_fix' => 'NA',
-			  'seen_random' => 'NA',
-			  'pareto_sidak_Phat' => 'NA',
-			  'pareto_sidak_Phatci_low'  => 'NA',
-			  'pareto_sidak_Phatci_up'	=>  'NA',
-			  'pareto_fisher_Phat' => 'NA',
-			  'pareto_fisher_Phatci_low' => 'NA',
-			  'pareto_fisher_Phatci_up' =>  'NA',
-			  'pareto_fix_Phat'	=> 'NA',
-			  'pareto_fix_Phatci_low' => 'NA',
-			  'pareto_fix_Phatci_up' => 'NA',
-			  'pareto_random_Phat' 	=> 'NA',
-			  'pareto_random_Phatci_low' =>  'NA',
-			  'pareto_random_Phatci_up' =>  'NA',
-			  'pareto_vegas_Phat'		=> 'NA',
-			  'pareto_vegas_Phatci_low' =>  'NA',
-			  'pareto_vegas_Phatci_up'	=> 'NA',
-		  };
-	
-		print "$gene{$gn}->{ensembl}\t$gene{$gn}->{hugo}\n";
-		  if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
-			  $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
-		  }
-		  print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
-			  $gene{$gn}->{pvalues}->min,
-			  $simulated_p->{vegas},
-			  $simulated_p->{sidak},
-			  $simulated_p->{fisher},
-			  $simulated_p->{z_fix},
-			  $simulated_p->{z_random},
-			  $z_based_p->{'I2'},
-			  $z_based_p->{'Q'},
-			  $z_based_p->{'Q_P'},
-			  $z_based_p->{'tau_squared'},
-			  $simulated_p->{wise_p},
-			  $simulated_p->{wise_method},
-			  $simulated_p->{N},
-		  
-			  $simulated_p->{'seen_vegas'}, # number of times stats was seen
-		      $simulated_p->{'seen_sidak'},
-		      $simulated_p->{'seen_fisher'},
-			  $simulated_p->{'seen_fix'},
-			  $simulated_p->{'seen_random'},
-		  
-			  $simulated_p->{'pareto_vegas_Phat'}, # VEGAS
-			  $simulated_p->{'pareto_vegas_Phatci_low'},
-			  $simulated_p->{'pareto_vegas_Phatci_up'},
-		  
-			  $simulated_p->{'pareto_sidak_Phat'},
-			  $simulated_p->{'pareto_sidak_Phatci_low'},
-			  $simulated_p->{'pareto_sidak_Phatci_up'},
-			  
-			  $simulated_p->{'pareto_fisher_Phat'}, # fisher
-			  $simulated_p->{'pareto_fisher_Phatci_low'},
-			  $simulated_p->{'pareto_fisher_Phatci_up'},
-			  
-			  $simulated_p->{'pareto_fix_Phat'},# z fix
-			  $simulated_p->{'pareto_fix_Phatci_low'},
-			  $simulated_p->{'pareto_fix_Phatci_up'},
-			  
-			  $simulated_p->{'pareto_random_Phat'}, # z random
-			  $simulated_p->{'pareto_random_Phatci_low'},
-			  $simulated_p->{'pareto_random_Phatci_up'},
-				  
-			  $pvalue_based_p->{Meff_Galwey},
-			  $pvalue_based_p->{Meff_gao},
-			  scalar @{ $gene{$gn}->{geno_mat_rows} });
-			  print $OUT "\n";
+	} else { # MND Sampling
+		my $simulated_p = {
+		  'sidak' => 'NA',
+		  'fisher' => 'NA',
+		  'z_fix' => 'NA',
+		  'z_random' => 'NA',
+		  'vegas' => 'NA',
+		  'wise_p' => 'NA',
+		  'wise_method' => 'NA',
+		  'N' => 0,
+		  'seen_vegas'	=> 'NA',
+		  'seen_sidak'	=> 'NA',
+		  'seen_fisher' => 'NA',
+		  'seen_fix' => 'NA',
+		  'seen_random' => 'NA',
+		  'pareto_sidak_Phat' => 'NA',
+		  'pareto_sidak_Phatci_low'  => 'NA',
+		  'pareto_sidak_Phatci_up'	=>  'NA',
+		  'pareto_fisher_Phat' => 'NA',
+		  'pareto_fisher_Phatci_low' => 'NA',
+		  'pareto_fisher_Phatci_up' =>  'NA',
+		  'pareto_fix_Phat'	=> 'NA',
+		  'pareto_fix_Phatci_low' => 'NA',
+		  'pareto_fix_Phatci_up' => 'NA',
+		  'pareto_random_Phat' 	=> 'NA',
+		  'pareto_random_Phatci_low' =>  'NA',
+		  'pareto_random_Phatci_up' =>  'NA',
+		  'pareto_vegas_Phat'		=> 'NA',
+		  'pareto_vegas_Phatci_low' =>  'NA',
+		  'pareto_vegas_Phatci_up'	=> 'NA',
+	  };
+		
+	  if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
+		  $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
 	  }
+		
+	  print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+		  $gene{$gn}->{pvalues}->min,
+		  $simulated_p->{vegas},
+		  $simulated_p->{sidak},
+		  $simulated_p->{fisher},
+		  $simulated_p->{z_fix},
+		  $simulated_p->{z_random},
+		  $z_based_p->{'I2'},
+		  $z_based_p->{'Q'},
+		  $z_based_p->{'Q_P'},
+		  $z_based_p->{'tau_squared'},
+		  $simulated_p->{wise_p},
+		  $simulated_p->{wise_method},
+		  $simulated_p->{N},
 	  
+		  $simulated_p->{'seen_vegas'}, # number of times stats was seen
+		  $simulated_p->{'seen_sidak'},
+		  $simulated_p->{'seen_fisher'},
+		  $simulated_p->{'seen_fix'},
+		  $simulated_p->{'seen_random'},
+	  
+		  $simulated_p->{'pareto_vegas_Phat'}, # VEGAS
+		  $simulated_p->{'pareto_vegas_Phatci_low'},
+		  $simulated_p->{'pareto_vegas_Phatci_up'},
+	  
+		  $simulated_p->{'pareto_sidak_Phat'},
+		  $simulated_p->{'pareto_sidak_Phatci_low'},
+		  $simulated_p->{'pareto_sidak_Phatci_up'},
+		  
+		  $simulated_p->{'pareto_fisher_Phat'}, # fisher
+		  $simulated_p->{'pareto_fisher_Phatci_low'},
+		  $simulated_p->{'pareto_fisher_Phatci_up'},
+		  
+		  $simulated_p->{'pareto_fix_Phat'},# z fix
+		  $simulated_p->{'pareto_fix_Phatci_low'},
+		  $simulated_p->{'pareto_fix_Phatci_up'},
+		  
+		  $simulated_p->{'pareto_random_Phat'}, # z random
+		  $simulated_p->{'pareto_random_Phatci_low'},
+		  $simulated_p->{'pareto_random_Phatci_up'},
+			  
+		  $pvalue_based_p->{Meff_Galwey},
+		  $pvalue_based_p->{Meff_gao},
+		  scalar @{ $gene{$gn}->{geno_mat_rows} });
+		  print $OUT "\n";
+    }
+  
 	# remove LD measures and genotypes from the stack that will not use again to free memory
 	foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
 	  if (scalar @{ $snp_to_gene{ $snp } } == 1){
@@ -1320,44 +1528,6 @@ sub make_file_name_array_interval {
 	return([@back]);
 }
 
-
-# usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
-sub build_index {
-    my $data_file  = shift;
-    my $index_file = shift;
-    my $offset     = 0;
-
-    while (<$data_file>) {
-        print $index_file pack("N", $offset);
-        $offset = tell($data_file);
-    }
-}
-
-# usage: line_with_index(*DATA_HANDLE, *INDEX_HANDLE, $LINE_NUMBER)
-# returns line or undef if LINE_NUMBER was out of range
-sub line_with_index {
-    my $data_file   = shift;
-    my $index_file  = shift;
-    my $line_number = shift;
-    
-    my $size;               # size of an index entry
-    my $i_offset;           # offset into the index of the entry
-    my $entry;              # index entry
-    my $d_offset;           # offset into the data file
-
-    $size = length(pack("N", 0));
-    $i_offset = $size * ($line_number - 1);
-    
-    seek($index_file, $i_offset, 0) or return;
-    read($index_file, $entry, $size);
-    $d_offset = unpack("N", $entry);
-	if (not defined $d_offset){
-		return('1');
-	} else {
-		seek($data_file, $d_offset, 0);
-		return scalar(<$data_file>);
-	}
-}
 
 sub gene_pvalue {
     my $gn = shift;

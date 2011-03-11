@@ -26,9 +26,48 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
-@EXPORT_OK = qw( extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
+@EXPORT = qw( build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
+@EXPORT_OK = qw( build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
 
+
+
+# usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
+sub build_index {
+    my $data_file  = shift;
+    my $index_file = shift;
+    my $offset     = 0;
+	
+    while (<$data_file>) {
+        print $index_file pack("N", $offset);
+        $offset = tell($data_file);
+    }
+}
+
+# usage: line_with_index(*DATA_HANDLE, *INDEX_HANDLE, $LINE_NUMBER)
+# returns line or undef if LINE_NUMBER was out of range
+sub line_with_index {
+    my $data_file   = shift;
+    my $index_file  = shift;
+    my $line_number = shift;
+    
+    my $size;               # size of an index entry
+    my $i_offset;           # offset into the index of the entry
+    my $entry;              # index entry
+    my $d_offset;           # offset into the data file
+	
+    $size = length(pack("N", 0));
+    $i_offset = $size * ($line_number - 1);
+    
+    seek($index_file, $i_offset, 0) or return;
+    read($index_file, $entry, $size);
+    $d_offset = unpack("N", $entry);
+	if (not defined $d_offset){
+		return('1');
+	} else {
+		seek($data_file, $d_offset, 0);
+		return scalar(<$data_file>);
+	}
+}
 
 # this subroutine read the fam file and stores the information in an array
 # the elements of the array are pseudo hashes with all the sample's information

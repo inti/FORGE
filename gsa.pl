@@ -25,10 +25,7 @@ our (	$help, $man, $gmt, $pval,
 	$report,$gene_sets,$ref_list,
 	$set_stat, $input_z, $verbose_output,
 	$append, $add_file_name,$all_are_background,
-	$cgnets,$complete_interval_sampling,
-	$best_x_interval, $gs_coverage, $interval_merge,
-	$interval_merge_by_chr, $node_similarity, $cgnets_all,
-	$Neff_gene_sets, $max_processes, $snp_assoc, $bfile,
+	$gs_coverage,$snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
 	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list,
 	$mnd,$mnd_N,$gene_p_type
@@ -54,16 +51,7 @@ GetOptions(
 	'append' => \$append,
 	'add_file_name' => \$add_file_name,
 	'backgroung_all_genes' => \$all_are_background,
-	'cgnets=s' => \$cgnets,
-	'best_per_interval' => \$best_x_interval,
-	'complete_interval_sampling' => \$complete_interval_sampling,
 	'gs_coverage=f' => \$gs_coverage,
-	'interval_merge=i' => \$interval_merge,
-	'interval_merge_by_chr' => \$interval_merge_by_chr,
-	'node_similarity=s'=> \$node_similarity, # NOT documented
-	'cgnets_all' => \$cgnets_all,
-	'Neff_gene_sets' => \$Neff_gene_sets,
-	'n_runs=i' => \$max_processes,
 	'snp_assoc=s@' => \$snp_assoc,
 	'bfile=s'	=> \$bfile,
 	'snpmap|m=s@' => \$snpmap,
@@ -93,20 +81,11 @@ if (defined $gs_coverage){
 	print_OUT("Removing pathway with less than [ " . $gs_coverage*100 . " % ] coverage",$LOG);
 }
 defined $gs_coverage or $gs_coverage = 0;
-defined $interval_merge_by_chr and $interval_merge = "inf";
-if (defined $interval_merge and defined $best_x_interval){
-	print_OUT("Using segment distance of [ $interval_merge ] to join recombination intervals during sampling",$LOG);
-}
 if (defined $perm){
 	print_OUT("Will run [ $perm ] permutations to estimate the mean and std deviation of the statistics undel the null",$LOG);
-	if (defined $best_x_interval){
-		print_OUT("Permutations with bext-per-interval option not supported at the moment.",$LOG);
-		exit(0);
-	}
 }
 if (defined $input_z and not defined $perm){ $perm = 10_000; }
 
-defined $interval_merge or $interval_merge = 0;
 defined $distance or $distance = 20;
 defined $report or $report = 250;
 defined $max_size or $max_size = 99_999_999; 
@@ -126,19 +105,6 @@ if (defined $mnd){
 	print_OUT("Will use multivariate normal distribution sampling to estimate gene-gene correlations. Using [ $mnd_N ] simulations with the [ $gene_p_type] gene p-value");
 }	
 print_OUT("Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size",$LOG);
-
-if (defined $recomb_intervals) {
-	if ((defined $best_x_interval) and (defined $complete_interval_sampling)){
-		print_OUT("Please choose one of the two sampling scheems -best_per_interval or -complete_interval_samplig\nFor more information type gsa.pl -man",$LOG);
-		exit(1);
-	}
-	if (not defined $complete_interval_sampling){
-		$best_x_interval = 1;
-		print_OUT("Using best gene per recombination interval for permutation sampling",$LOG);
-	} elsif (defined $complete_interval_sampling) {
-		print_OUT("Using all genes in recombination interval for permutation sampling",$LOG);
-	}
-}
 
 defined $set_stat or $set_stat = 'mean';
 my $network_stat = defined_set_stat($set_stat);
@@ -201,40 +167,6 @@ while (my $line = <PVAL>) {
 }
 close(PVAL);
 print_OUT("   '-> [ " . scalar (keys %gene_data) . " ] genes will be analysed",$LOG);
-
-# if a CGNets analysis is performed.
-# read the list of genes for which gene-sets are to be analysed
-# discard the ones without gene-statistic and report how many are left
-
-my @candidate_genes = ();
-if (defined $cgnets){
-	open (LIST, $cgnets) or die $!;
-	print_OUT("Reading CGNets seed genes from [ $cgnets ]",$LOG);
-	@candidate_genes = <LIST>;
-	close(LIST);
-	chomp(@candidate_genes);
-	my %tmp = ();
-	map { $tmp{lc($_)} = ""; } @candidate_genes;
-	@candidate_genes = keys %tmp;
-	print_OUT("  '-> [ " . scalar @candidate_genes . " ] unique CGNets seeds read",$LOG);
-	for (my $i = 0; $i < scalar @candidate_genes; $i++){
-		$candidate_genes[$i] = lc($candidate_genes[$i]);
-		if (not exists $gene_data{$candidate_genes[$i]}){ splice(@candidate_genes,$i,1); }
-	}
-	if (scalar @candidate_genes == 0){
-		print_OUT("None of the CGNets seed genes has statistics",$LOG);
-		print_OUT("Bye for now",$LOG);
-		exit(1);
-	}
-	print_OUT("  '-> of them [ " . scalar @candidate_genes . " ] have statistics",$LOG);
-}
-
-
-
-my %recomb_int = ();
-if ( defined $recomb_intervals) {
-	%recomb_int = %{ read_recombination_intervals($recomb_intervals,\%gene_data) };
-}
 
 if (defined $gene_sets){
 	print_OUT("Reading Gene-sets from command line [ " . @{$gene_sets} . " ]",$LOG);
@@ -307,130 +239,6 @@ foreach my $gene_set_file (@$gmt){
 		# then it will keep those that do not share recomb inter with other genes.
 		# the cases where more than one gene belong to the same recombination interval
 		# are solve by choosing the best p-value per recombination interval.
-		if (defined $best_x_interval){
-			my @reduced_set = (); # store here the genes of the reduced set
-			my %intervals = (); # store here the comb inter of the gene-set genes
-			# loop over the gene of the gene set
-			foreach my $gene ( @{ $p->{genes} } ){
-				# if the gene is not map to any recombiantion interval. e.g. it is in a recomb hotspot, keep it
-				if (scalar @{ $gene_data{$gene}->{recomb_int}} == 0){
-					push @reduced_set, $gene;
-				} else { # if the gene is in a recomb interval. store the recomb int ID and all genes map to it from the gene set
-					foreach my $int (@{ $gene_data{$gene}->{ recomb_int }}){
-						push @{ $intervals{$int} }, $gene;
-					}
-				}
-			}
-			# now for each of the recombination intervals with genes from the gene-set
-			# check if it has more than one gene, if so choose the best p-value and keep it.
-			my %nr_4_reduced_set = ();
-			my %redundant_genes = ();
-			if ($interval_merge > 0){
-				my @all_int = sort {$a <=>$b } map { $_ =~ m/interval.(\d+)/; } keys %intervals; 
-				my %int_chr = ();
-				map { push @{ $int_chr{ $recomb_int{"interval.$_"}->{chr} }  }, $_; } @all_int;
-				my %ri_groups = ();
-				my $group_counter = 0;
-				my %int_membership = ();
-				foreach my $chr (keys %int_chr){
-					my @ri = @{ $int_chr{$chr} };
-					if (scalar @ri == 1){
-						push @{ $ri_groups{$group_counter} }, $ri[0];
-						$int_membership{$ri[0]} = $group_counter;
-						$group_counter++;
-						next;
-					}
-					for (my $i = 0; $i < scalar @ri; $i++){
-						my $int1 = $ri[$i];
-						for (my $p = $i; $p < scalar @ri; $p++){
-							next if ($p == $i);
-							my $int2 = $ri[$p];
-							if (abs ($int1 - $int2) > $interval_merge){
-								if (not exists $int_membership{$int1} and not exists $int_membership{$int2}){
-									$int_membership{$int1} = $group_counter;
-									push @{ $ri_groups{$group_counter} }, $int1;
-									$group_counter++;
-									$int_membership{$int2} = $group_counter;
-									push @{ $ri_groups{$group_counter} }, $int2;
-									$group_counter++;
-								}
-								if ( not exists $int_membership{$int1} ) {
-									$int_membership{$int1} = $group_counter;
-									push @{ $ri_groups{$group_counter} }, $int1;
-									$group_counter++;
-								}
-								if ( not exists $int_membership{$int2} ) {
-									$int_membership{$int2} = $group_counter;
-									push @{ $ri_groups{$group_counter} }, $int2;
-									$group_counter++;
-								}
-							} else {
-								# if none has a group
-								if (not exists $int_membership{$int1} and not exists $int_membership{$int2}){
-									$int_membership{$int1} = $group_counter;
-									$int_membership{$int2} = $group_counter;
-									push @{ $ri_groups{$group_counter} }, $int1, $int2;
-									$group_counter++;
-									next;
-								}
-								if (exists $int_membership{$int1} and exists $int_membership{$int2}){
-									map {
-										$int_membership{$_} = $int_membership{$int2};
-									} @{ $ri_groups{$int_membership{$int1}} };
-									
-									push @{ $ri_groups{$int_membership{$int2}} }, @{ $ri_groups{$int_membership{$int1}} };
-									delete $ri_groups{$int_membership{$int1} };
-								}
-								if ( not exists $int_membership{$int1} ) {
-									$int_membership{$int1} = $int_membership{$int2};
-									push @{ $ri_groups{$int_membership{$int2}} }, $int1;
-								}
-								if ( not exists $int_membership{$int2} ) {
-									$int_membership{$int2} = $int_membership{$int1};
-									push @{ $ri_groups{$int_membership{$int1}} }, $int2;
-								}
-							}
-						}
-					}
-				}
-				# Merge intervals that are close to each other.
-				foreach my $group (keys %ri_groups){
-					next if (scalar  @{ $ri_groups{$group} } == 1);
-					for (my $c = 1; $c < scalar  @{ $ri_groups{$group} }; $c++){
-						push @{ $intervals{ "interval.$ri_groups{$group}->[0]" } }, @{ $intervals{ "interval.$ri_groups{$group}->[$c]" } };
-						delete($intervals{ "interval.$ri_groups{$group}->[$c]" } );
-					}
-				}
-			}
-			foreach my $int (keys %intervals){
-				# if only one gene in the recombination interval, keep it
-				if (scalar @{ $intervals{$int} } == 1){
-					map { $nr_4_reduced_set{$_} = 1; } @{ $intervals{$int} };
-				} else { # if there are more than one gene, keep the one with the best p-value.
-					@{ $intervals{$int} } = sort {  $gene_data{$b}->{stat} <=> $gene_data{$a}->{stat} } @{ $intervals{$int} };
-					my $top = shift @{ $intervals{$int} };
-					$nr_4_reduced_set{ $top } = 1 + scalar @{ $intervals{$int} }; 
-					# store the ids of the genes dropped for record
-					map { $redundant_genes{$_} = ""; } @{ $intervals{$int} };
-				} 
-			}
-			# finally redefine the gene set with the independent genes and their statistics.
-			@{ $p->{"gene_recomb_inter_redundant"} } = keys %redundant_genes;
-			foreach my $g (keys %nr_4_reduced_set){
-				push @{ $p->{'genes'} }, $g;
-				if ( $nr_4_reduced_set{ $g } > 1){
-					my $sidak_p = 1 - ( 1 - $gene_data{$g}->{pvalue})**$nr_4_reduced_set{ $g };
-					$sidak_p -= 1e-15 if ($sidak_p ==1);
-					$sidak_p =  $gene_data{$g}->{pvalue} * $nr_4_reduced_set{ $g } if ($sidak_p ==0);
-					push @{ $p->{'stats'} } , -1 * gsl_cdf_ugaussian_Pinv($sidak_p);
-				} else {
-					push @{ $p->{'stats'} } , $gene_data{$g}->{stat};
-				}
-			}
-			$p->{intervals} = \%intervals;
-			@{$p->{'genes'}} = keys %nr_4_reduced_set;
-			$p->{N_in} = scalar @{$p->{'genes'}}; #+  scalar @{$p->{"gene_recomb_inter_redundant"}};
-		}
 		$p->{N_in} = scalar @{$p->{'genes'}} if (not defined $p->{N_in});
 		if (scalar @{ $p->{'stats'} } == 0){  
 			@{ $p->{'stats'} } = map { $gene_data{$_}->{stat} } @{$p->{'genes'}};  
@@ -809,14 +617,9 @@ while (my $p = shift @pathways) {
 	
 	if (defined $perm){
 		$Sm = &$network_stat( $p->{stats} );
-		if (defined $recomb_intervals){
-			my $rand_stats = pdl @{ get_null_distribution($perm,[keys %genes_in_paths],$p,\%recomb_int, \%gene_data) };
+		if (not defined $null_size_dist{$m}){
+			my $rand_stats = pdl @{ get_null_distribution($perm,[keys %genes_in_paths],$p,{}, \%gene_data)};
 			$null_size_dist{$m} = { 'mean' => $rand_stats->average, 'sd' => $rand_stats->stdv };
-		} else {
-			if (not defined $null_size_dist{$m}){
-				my $rand_stats = pdl @{ get_null_distribution($perm,[keys %genes_in_paths],$p,\%recomb_int, \%gene_data)};
-				$null_size_dist{$m} = { 'mean' => $rand_stats->average, 'sd' => $rand_stats->stdv };
-			}
 		}
 		my $z_score_empirical = ( ( $Sm - $null_size_dist{$m}->{mean}) )/$null_size_dist{$m}->{sd};
 		
@@ -846,255 +649,11 @@ while (my $p = shift @pathways) {
 		print OUT "\n";
 	}   
 }
-# Performe CGNet analysis
-if (defined $cgnets or defined $cgnets_all){
-	# print out header
-	open (OUTCGNETS, ">$out.cgnets") or die $!;
-	print OUTCGNETS join "\t", ("gene_symbol","gene_pvalue","combined_z","N_gene_sets","Neff_gs","gene_set_name","best_p","sidak_best_p","sidak_experiment_wise_best_p","gs_name_BF","log10_best_BF","log10_global_BF","Neff_gs_exp_wise","all_gs_names","\n");
-	print scalar localtime(), "\t", "Writting CGNets per gene results to [ $out.cgnets ]\n";
-	# now calculate the significance for the CGNets.
-	# significance will be calculated for the CGNets of each seed node.
-	my @candidate_paths = ();
-	# If -cgnets_all then all gene in gene-sets and all gene-sets will be analysed.
-	if (defined $cgnets_all){ @candidate_genes = keys %genes_in_paths; } 
-	print_OUT("   '-> [ " . scalar @candidate_genes . " ] CGNets seed genes",$LOG);
-	my $index = 0;
-	my %gene_index = ();
-	my $p_index = 0; # this is the index of the gene-set in the @candidate_paths array
-	my $g_index = 0; # this will be the index of the gene dimension in the $p_cor piddle matrix.
-	my %genes_paths_map = ();
-	print_OUT("Cheking overlap between CGNets seeds and gene-sets",$LOG);
-	# generate and index for the gene-sets and the genes.
-	# the index will be used to fill up the correlation matrix among gene-sets
-	foreach my $p (@pathways){
-		next if ($p->{N_in} < 3);
-		# consider the genes the were previouslt eliminated due to redundancy in the recombination intervals
-		my $all_p_genes = [@{$p->{genes}},@{ $p->{"gene_recomb_inter_redundant"} }];
-		# check if the gene-set genes overlap with the CGNets seeds
-		my $overlap = 0;
-		if (defined $cgnets_all) {$overlap = 1;} # by definition all genes and gene-sets will be included so always they will overlap
-		else { $overlap = check_if_overlap($all_p_genes,\@candidate_genes)}
-		if ($overlap == 1){
-			push @candidate_paths, $p;
-			foreach my $g (@{ $all_p_genes }){
-				# if this is the first time we find this gene
-				# give it an index number.
-				if (not exists $gene_index{ $g }){
-					$gene_index{ $g } = $g_index;
-					$g_index++;
-				}
-				# record the link between this pathway and the gene 
-				push @{ $genes_paths_map{$g} }, { 'path_index' => $p_index, 'gene_index' => $gene_index{$g} };
-			}
-			$p_index++;
-		}
-	}
-
-	print_OUT("   '-> [ " . scalar @candidate_paths . " ] gene-sets with CGNets seed genes",$LOG);
-	# check if there are CGNets seed without a gene-set a report it
-	my @candidates_no_genesets = ();
-	map {  if (not exists $genes_paths_map{$_}){ push @candidates_no_genesets, $_; }  } @candidate_genes;
-	if (scalar @candidates_no_genesets != 0){
-		print_OUT("PLEASE NOTE that [ " . scalar @candidates_no_genesets . " ] CGNets seed have not been mapped to gene-sets",$LOG);
-		print_OUT("   '-> Writting their ids to [ $out.cgnets.without_genesets ]",$LOG);
-		open (NOMAPPED, ">$out.cgnets.without_genesets") or die $!;
-		print NOMAPPED join "\n",@candidates_no_genesets;
-		print NOMAPPED "\n";
-		close(NOMAPPED);
-		if (scalar @candidates_no_genesets == scalar @candidate_genes){
-			print_OUT("Hello!! There are no CGNets seed left for analysis. Bye now.",$LOG);
-			exit(1);
-		}
-	}
-	
-	my $overall_cgnet_Meff = 1;
-	$overall_cgnet_Meff = scalar @candidate_paths if (not defined $Neff_gene_sets);
-	my $p_cor = null;
-	if (defined $Neff_gene_sets){
-		# generare the matrix with gene-sets X gene statistics
-		my $path_gene_content = zeroes scalar @candidate_paths, scalar keys %genes_paths_map;
-		foreach my $g (keys %genes_paths_map){
-			foreach my $index_pair (@{ $genes_paths_map{$g} }) {
-				set $path_gene_content, $index_pair->{path_index}, $index_pair->{gene_index}, $gene_data{$g}->{stat};
-			}
-			
-		}
-		print_OUT("Calculating effective number of gene-set for experiment wise correction",$LOG);
-		print_OUT("Calculating correlation matrix among gene-sets. This may take a while, go for a coffe is using -cgnets_all",$LOG);
-		# this is to ensure piddle of > than 1 Gb can be generated
-#		if (scalar @candidate_paths > 1_000){
-#			$p_cor = float $PDL::BIGPDL=zeroes( scalar @candidate_paths, scalar @candidate_paths);
-#		} else {
-			$p_cor = float zeroes scalar @candidate_paths, scalar @candidate_paths;
-#		}
-		$p_cor->diagonal(1,0)++;
-		$p_cor = $path_gene_content->transpose->corr_table;
-		# calculate effective number of gene-sets for the experiment wise correction
-		$overall_cgnet_Meff = number_effective_tests($p_cor);
-		print_OUT("\t   '-> [ $overall_cgnet_Meff ] effective number of gene-sets",$LOG);
-	} else {
-		print_OUT("Will use the number of pathway as number of tests. Be aware this is a conservative estimate",$LOG);
-	}
-	
-	my $counter  = 0;
-	my $rep = int((scalar @candidate_genes)/25);
-	$rep = 1 if ($rep == 0);
-	# now calculate the CGNets statistics
-	foreach my $seed (@candidate_genes){
-		&report_advance($counter,$rep," CGNets seed");
-		$counter++;
-		$seed = lc($seed);
-		#print "SEED $seed\n";
-		#unless (not defined $node_similarity){
-		#	if (not exists $row_number{ $seed }){
-		#		print scalar localtime(), "\t", "Gene [ $seed ] does not have similarity measures\n";
-		#		next;
-		#	}
-		#}
-		
-		# get the indexes in correlation matrix of the pathways of this CGNet seed 
-		my $seed_paths_index = pdl map { $_->{path_index} } @{ $genes_paths_map{$seed}};
-		# initialize the statistics overall CGNets 
-		my $cgnet_z = 0;
-		# number of gene-sets containing this seed
-		my $N_paths = @{ $genes_paths_map{$seed} };
-		if ($N_paths > 1){
-			# initialize number of effective CGNets as number of gene-sets
-			my $seed_Meff_paths = $N_paths;
-			my @seed_paths_names = (); # names of these gene-sets
-			my $ps = []; # store here the statistics of each gene-set
-			my $Zs = [];
-			my $Ms = [];
-			my $seed_per_path_Z = [];
-			foreach (@candidate_paths[$seed_paths_index->list]) {
-				my $seed_stat_for_gene_set = undef;
-				if (not defined $best_x_interval){
-					$seed_stat_for_gene_set = $gene_data{$seed}->{stat};					
-				} elsif (grep $_ eq $seed, $_->{genes}){
-					$seed_stat_for_gene_set = $gene_data{$seed}->{stat};
-				} else {
-					my @seed_intervals = @{ $gene_data{$seed}->{recomb_int} };
-					foreach my $g (@{$_->{genes}}){
-						if (check_if_overlap($gene_data{$g}->{recomb_int},$gene_data{$seed}->{recomb_int})){
-							$seed_stat_for_gene_set = $gene_data{$g}->{stat};
-							last;
-						}
-					}
-				}
-				if (not defined $seed_stat_for_gene_set ) {
-					print_OUT("I could not match the interval statistics for [ $seed ]",$LOG);
-					exit;
-				}
-				push @{ $Zs }, $_->{z_stat_raw};
-				push @{ $Ms }, $_->{N_in};
-				push @{ $seed_per_path_Z }, $seed_stat_for_gene_set;
-				push @seed_paths_names,$_->{name};
-			}
-			my $P_Gplus = double $gene_data{$seed}->{pvalue};
-			my $P_Gminus = 1 - double $gene_data{$seed}->{pvalue};
-			$Zs = double pdl $Zs; # the network z-scores
-			$Ms = double pdl $Ms; # the network sizes
-			$seed_per_path_Z = pdl @{ $seed_per_path_Z }; # the contribution of the seed node to each gene-set
-			# these are the p-values for the gene-sets including the seed.
-			my $P_ni_Gplus = double 1-gsl_cdf_ugaussian_P( $Zs ); # now as a piddle
-			
-			# Calculate the corrected statistic for each gene-set by using the stats of the seed node as if it were under the oposite hypothesis
-			my $P_ni_Gminus = double ($Zs*$sd)/sqrt($Ms)  + $mu  - $seed_per_path_Z/$Ms +-$seed_per_path_Z/$Ms; 
-			$P_ni_Gminus = ( ( $P_ni_Gminus - $mu) * (sqrt($Ms - 1 ) ) )/$sd; # here are the gene-set z-scores minus the seed contribution
-			$P_ni_Gminus = double 1-gsl_cdf_ugaussian_P($P_ni_Gminus); # now as p-values
-			# calculate the gene-sets stats without the seed
-			my $P_ni_noG = double ($Zs*$sd)/sqrt($Ms)  + $mu  - $seed_per_path_Z/$Ms; 
-			$P_ni_noG = ( ( $P_ni_noG - $mu) * (sqrt($Ms - 1 ) ) )/$sd; # here are the gene-set z-scores minus the seed contribution
-			$P_ni_noG = double 1-gsl_cdf_ugaussian_P($P_ni_noG); # now as p-values
-			# the overall BF has information for the contribution of all gene-sets
-			my ($P_N_Gplus,$P_N_Gminus) = undef;
-			
-			if (defined $Neff_gene_sets){
-				# extract the correlations from the gene-set correlation matrix
-				my $path_cor = $p_cor->($seed_paths_index,$seed_paths_index);
-				# calculate number of effective tests
-				$seed_Meff_paths = number_effective_tests($path_cor);
-				$path_cor = abs($path_cor);
-				# calculate the makambi fisher p-value over the gene-sets of this seed
-				my $w = ones $N_paths; # the weights
-				my ($chi_stat_P_ni_Gplus,$df_stat_P_ni_Gplus) = get_makambi_chi_square_and_df($path_cor, $w, $P_ni_Gplus);
-				# p-value over all networks
-				$P_N_Gplus = double 1 - gsl_cdf_chisq_P($chi_stat_P_ni_Gplus,$df_stat_P_ni_Gplus);
-				# change the to other tail
-				# the z-score over all netwotks
-				$cgnet_z = double -1 * gsl_cdf_ugaussian_Pinv( $P_N_Gplus );
-				# the -log10 of the p-values over all networks
-				
-				my ($chi_stat_P_ni_Gminus,$df_stat_P_ni_Gminus) = get_makambi_chi_square_and_df($path_cor, $w, $P_ni_Gminus);
-				my $P_N_Gminus = double 1 - gsl_cdf_chisq_P($chi_stat_P_ni_Gminus,$df_stat_P_ni_Gminus);
-				
-			} else {
-				$cgnet_z = average pdl map { $_->{z_stat_raw}; } @candidate_paths[$seed_paths_index->list];
-				$P_N_Gminus = double 1 - gsl_cdf_ugaussian_P(davg (-1 * gsl_cdf_ugaussian_Pinv($P_ni_Gminus))) ;
-				$P_N_Gplus = double 1 - gsl_cdf_ugaussian_P($cgnet_z);
-			}
-			# now lets calculate the p(G|N) = p(G)*p(N|G)/p(N)
-			# correct P(Ni|G) for number of gene-sets tested
-			my $log10_P_G_Ni = double log10(1-$P_Gplus) + log10(1-$P_ni_Gplus) - log10( double((1-$P_ni_Gplus)*$P_Gplus) + double((1-$P_ni_Gminus)*$P_Gminus));
-			# this are the bayes factors for each gene-set: p(G|N)/p(G)
-			my $log10_BF = double $log10_P_G_Ni - log10(1-$P_Gplus);
-			
-			my $log10_P_G_N = double log10( $P_Gplus ) + log10( $P_N_Gplus ) - log10( double($P_N_Gplus*$P_Gplus) + double($P_N_Gminus*$P_Gminus) );
-			my $log10_overall_BF = double $log10_P_G_N - log10( $P_Gplus );
-			my $best_bf_path_name = $seed_paths_names[$log10_BF->maximum_ind];
-			# the sidak corrected tests for the best gene-set
-			my $sidak_p = 1 - (1 - $P_ni_noG->min)**$seed_Meff_paths;
-			my $sidak_experiment_wise = 1 - (1 - $P_ni_noG->min)**$overall_cgnet_Meff;
-			$seed = uc($seed);
-			my $best_path_name = $seed_paths_names[$P_ni_noG->minimum_ind];
-			my $path_names = join ",", @seed_paths_names;
-			printf OUTCGNETS ("$seed\t%.3e\t%.3f\t$N_paths\t%.3f\t$best_path_name\t%.2e\t%.2e\t%.2e\t$best_bf_path_name\t%.3f\t%.3f\t%.3f\t$path_names\n",
-					$P_Gplus,
-					$cgnet_z,$seed_Meff_paths,
-					$P_ni_noG->min,$sidak_p,
-					$sidak_experiment_wise,
-					$log10_BF->max,
-					$log10_overall_BF,
-					$overall_cgnet_Meff);		
-		} elsif (scalar @{ $genes_paths_map{$seed}} == 1){
-			my $seed_stat_for_gene_set = undef;
-			if (not defined $best_x_interval){
-				$seed_stat_for_gene_set = $gene_data{$seed}->{stat};					
-			} elsif (grep $_ eq $seed, $_->{genes}){
-				$seed_stat_for_gene_set = $gene_data{$seed}->{stat};
-			} else {
-				my @seed_intervals = @{ $gene_data{$seed}->{recomb_int} };
-				foreach my $g (@{$_->{genes}}){
-					if (check_if_overlap($gene_data{$g}->{recomb_int},$gene_data{$seed}->{recomb_int})){
-						$seed_stat_for_gene_set = $gene_data{$g}->{stat};
-						last;
-					}
-				}
-			}
-			$cgnet_z = $candidate_paths[$seed_paths_index->list]->{z_stat_raw};
-			my $P_Ni_G = double ($cgnet_z*$sd)/sqrt($candidate_paths[$seed_paths_index->list]->{N_in})  + $mu  - 1/$candidate_paths[$seed_paths_index->list]->{N_in};#$seed_stat_for_gene_set/$candidate_paths[$seed_paths_index->list]->{N_in}; 
-			$P_Ni_G = ( ( $P_Ni_G - $mu) * (sqrt($candidate_paths[$seed_paths_index->list]->{N_in} - 1 ) ) )/$sd; # here are the gene-set z-scores minus the seed contribution
-			$P_Ni_G = double 1-gsl_cdf_ugaussian_P($P_Ni_G); # now as p-values
-			my $log10_P_G = double log10($gene_data{$seed}->{pvalue});
-			# now lets calculate the p(G|N) = p(G)*p(N|G)/p(N)
-			my $P_Ni = double 1-gsl_cdf_ugaussian_P($cgnet_z);
-			my $log10_P_G_Ni = double $log10_P_G + $P_Ni_G->log10 - $P_Ni->log10;
-			# this are the bayes factors for each gene-set: p(G|N)/p(G)
-			my $log10_BF = double $log10_P_G_Ni - $log10_P_G;
-			
-			my $p = 1-gsl_cdf_ugaussian_P($cgnet_z);
-			my $sidak_experiment_wise = 1 - (1 - $p)**$overall_cgnet_Meff;
-			$seed = uc($seed);
-			my $sidak_experiment_wise10_BF10_BF = "FOO";
-			printf OUTCGNETS ("$seed\t%.3f\t1\t1\t$candidate_paths[$seed_paths_index->list]->{name}\t%.2e\t%.2e\t%.2e\t$candidate_paths[$seed_paths_index->list]->{name}\t%.3f\t%.3f\t%.3f\t$candidate_paths[$seed_paths_index->list]->{name}\n", $cgnet_z,$p,$p,$sidak_experiment_wise10_BF10_BF,$overall_cgnet_Meff);
-		} elsif (scalar @{ $genes_paths_map{$seed}} == 0){ next; }
-	}
-
-
-}
 
 print_OUT("Well Done",$LOG);
+
 exit;
+
 sub simulate_mnd_gene_set {
 	my $gene_set_data = shift; # HASH ref
 	my $set_stats = shift; # HASH ref
@@ -1527,26 +1086,14 @@ sub get_null_distribution {
 				}
 				my @index = @{ get_rand_index(scalar @interval_sampling_universe, scalar @interval_genes)};
 				my @selected_genes = sort { $gene_stats->{ $b }->{stat} <=> $gene_stats->{ $a }->{stat}} @interval_sampling_universe[@index];
-				if (defined $best_x_interval){
-					my $top_per_rand_invertal = shift @selected_genes;
-					push @sampled_genes_interval , { 'id'=>$top_per_rand_invertal, 'n' => scalar @interval_sampling_universe };
-				} else {
-					foreach my $s (@selected_genes){
-						push @sampled_genes_interval, { 'id'=>$s, 'n' => scalar @interval_sampling_universe };
-					}
+				foreach my $s (@selected_genes){
+					push @sampled_genes_interval, { 'id'=>$s, 'n' => scalar @interval_sampling_universe };
 				}
 			}
 		}
 		my @sampled_gene_stats = map { $gene_stats->{$_}->{stat}; } @sampled_genes_normal;
 		foreach my $sampled_gene ( @sampled_genes_interval ){
-			if (defined $best_x_interval){
-				my $sidak_p = 1 - ( 1 - $gene_data{ $sampled_gene->{id} }->{pvalue} )**$sampled_gene->{n};
-				$sidak_p -= 1e-15 if ($sidak_p ==1);
-				$sidak_p =  $gene_data{$sampled_gene->{id}}->{pvalue} * $sampled_gene->{n} if ($sidak_p ==0);
-				push @sampled_gene_stats, -1 * gsl_cdf_ugaussian_Pinv($sidak_p);
-			} else {
-				push @sampled_gene_stats, $gene_stats->{ $sampled_gene->{id} }->{stat};
-			}
+			push @sampled_gene_stats, $gene_stats->{ $sampled_gene->{id} }->{stat};
 		}
 		my $s = &$network_stat(\@sampled_gene_stats);
 		push @rand_stat, $s;
@@ -1588,30 +1135,6 @@ sub get_rand_index {
 	return(\@index);
 }
 
-sub read_recombination_intervals {
-        my $file = shift;
-	my $gene_info = shift;
-        print_OUT("Reading mapping between genes and recombination intervals from [ $file ]",$LOG);
-        my %back;
-        open (FH,$file) or die $!;
-        while (my $line = <FH>){
-                my ($chr,$start,$end,$id,$all_genes) = split(/\t/,$line);
-                my @genes = map { $_=~ m/__(.*)/; } split(/;/,$all_genes);
-		@genes = map { lc($_); } @genes;
-                $back{$id} = {  'id'=>$id,
-                                'chr'=>$chr,
-                                'start'=>$start,
-                                'end'=>$end,
-                                'genes'=> [],
-                                'N'=> scalar @genes };
-                foreach my $g (@genes){
-                        next if (not exists $gene_info->{$g});
-                        push @{ $gene_info->{$g}->{recomb_int} }, $id;
-                        push @{ $back{$id}->{genes} }, $g;
-                }
-        }
-        return(\%back);
-}
 
 sub report_advance {
 	my ($index,$rep,$tag) = @_;

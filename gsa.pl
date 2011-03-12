@@ -11,8 +11,6 @@ use PDL::Ufunc;
 use PDL::LinearAlgebra qw(mchol);
 use Data::Dumper;
 use IO::File;
-use IO::Handle;
-use IO::Uncompress::Gunzip qw(gunzip);
 
 # Load local functions
 use GWAS_IO;
@@ -350,18 +348,9 @@ if (defined $snpmap){
 			print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
 			next;
 		}
-		my $MAP = '';
-		if ( $snp_gene_mapping_file =~ m/.gz$/) {
-			print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
-			$MAP = new IO::Uncompress::Gunzip $snp_gene_mapping_file;
-		} else {
-			$MAP = new IO::Handle;
-			my $fh = new IO::File;
-			print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
-			$fh->open("$snp_gene_mapping_file");
-			$MAP->fdopen(fileno($fh),"r");
-		}
-		
+		my $MAP = new IO::Handle;
+		print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
+		$MAP->open("$snp_gene_mapping_file");
 		while (my $read = $MAP->getline()) {
 			chomp($read);
 			# the line is separate in gene info and snps. the section are separated by a tab.

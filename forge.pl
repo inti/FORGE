@@ -27,7 +27,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
-	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd
+	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump
 );
 
 GetOptions(
@@ -71,6 +71,7 @@ GetOptions(
 	'mnd_target=i' => \$mnd_sim_target,
 	'mnd_max=i' => \$mnd_sim_max,
 	'mnd_methods=s' => \$mnd_sim_wise_correction_methods,
+	'stats_dump=s' => \$mperm_dump,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -307,6 +308,7 @@ while (  my $a = <ASSOC> ) {
                                         'stat' => $STAT,
                                         'r2' => $R2,
                                         'effect_size_measure' => $effect,
+										'line' => $line++-1,
         				};
    # correct for genomic control if a lambda > 1 was specified.   
    if ($lambda == 1) {
@@ -466,7 +468,9 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 		  }
 		  # exclude snps not in the association file nor in the bim file
 		  next unless ( exists $assoc_data{$s} );
-		  next unless ( exists $bim_ids{$s});
+		   if (not defined $mperm_dump){
+			   next unless ( exists $bim_ids{$s});
+		   }
 		  $nr_snps{$s} = "";
 	   }
 	   @mapped_snps = keys %nr_snps;
@@ -1289,6 +1293,174 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			} # close foreach my $gn 
 		} # close if exists
 	} # close foreach loop over snps
+} elsif (defined $mperm_dump){
+	
+	my $null_stats = extract_stats_from_mperm_dump_all_files($mperm_dump);
+	print join " ",$null_stats->dims,"\n";
+	foreach my $gn (keys %gene){
+		my $matrix = [];	
+		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
+			next if (not exists $assoc_data{ $mapped_snp } );	
+			push @{ $matrix }, $null_stats->($assoc_data{ $mapped_snp }->{line},)->flat;
+			# add snp id to matrix row names
+			push @{ $gene{$gn}->{geno_mat_rows} }, $mapped_snp;
+			# store the p-value of the snp
+			push @{ $gene{$gn}->{pvalues} }, $assoc_data{ $mapped_snp }->{pvalue}; 
+			my $effect_measure = $assoc_data{ $mapped_snp }->{effect_size_measure};
+			if (defined $effect_measure){
+				if ($effect_measure eq 'or'){
+					push @{ $gene{$gn}->{effect_size} }, log $assoc_data{ $mapped_snp }->{$effect_measure};
+				} else {
+					push @{ $gene{$gn}->{effect_size} }, $assoc_data{ $mapped_snp }->{$effect_measure};
+				}
+				if (defined $assoc_data{ $mapped_snp }->{se}){
+					if ($effect_measure eq 'or'){
+						#push @{ $gene{$gn}->{effect_size_se} }, abs log $assoc_data{ $bim[ $bim_ids{$mapped_snp} ]->{snp_id} }->{se};
+						push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
+					} else {
+						push @{ $gene{$gn}->{effect_size_se} }, $assoc_data{ $mapped_snp }->{se};
+					}
+				}
+			}
+		}
+		# generate the genotype matrix as a PDL piddle
+		$gene{$gn}->{genotypes} = pdl $matrix;
+		($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r})  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);
+		# Calculate the weights for the gene
+		$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
+		# calculate gene p-values
+		my $z_based_p = z_based_gene_pvalues($gene{$gn},$mnd);
+		if (ref($z_based_p) ne 'HASH' and $z_based_p == -9){
+			$z_based_p = {
+				'B_stouffer_fix' => "NA",
+				'B_stouffer_random' => "NA",
+				'B_fix' => "NA",
+				'B_random' => "NA",
+				'V_fix' => "NA",
+				'V_random' => "NA",
+				'Chi_fix' => "NA",
+				'Chi_random' => "NA",
+				'Z_P_fix' => "NA",
+				'Z_P_random' => "NA",
+				'Q' => "NA",
+				'Q_P' => "NA",
+				'I2' => "NA",
+				'tau_squared' => "NA",
+				'N' => scalar @{ $gene{$gn}->{geno_mat_rows} },
+			};
+		} 
+		my $pvalue_based_p = gene_pvalue($gn);
+		
+		# check which analysis strategy to follow 
+		if (not defined $mnd){ # asymptotic 
+			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$pvalue_based_p->{sidak_min_p},
+			$pvalue_based_p->{fisher},
+			$pvalue_based_p->{fisher_chi},
+			$pvalue_based_p->{fisher_df},
+			$z_based_p->{'B_fix'},
+			$z_based_p->{'V_fix'},
+			$z_based_p->{'Z_P_fix'},
+			$z_based_p->{'B_random'},
+			$z_based_p->{'V_random'},
+			$z_based_p->{'Z_P_random'},
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			$z_based_p->{'Q_P'},
+			$z_based_p->{'tau_squared'},
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
+			print $OUT "\n";
+		} else { # MND Sampling
+			my $simulated_p = {
+				'sidak' => 'NA',
+				'fisher' => 'NA',
+				'z_fix' => 'NA',
+				'z_random' => 'NA',
+				'vegas' => 'NA',
+				'wise_p' => 'NA',
+				'wise_method' => 'NA',
+				'N' => 0,
+				'seen_vegas'	=> 'NA',
+				'seen_sidak'	=> 'NA',
+				'seen_fisher' => 'NA',
+				'seen_fix' => 'NA',
+				'seen_random' => 'NA',
+				'pareto_sidak_Phat' => 'NA',
+				'pareto_sidak_Phatci_low'  => 'NA',
+				'pareto_sidak_Phatci_up'	=>  'NA',
+				'pareto_fisher_Phat' => 'NA',
+				'pareto_fisher_Phatci_low' => 'NA',
+				'pareto_fisher_Phatci_up' =>  'NA',
+				'pareto_fix_Phat'	=> 'NA',
+				'pareto_fix_Phatci_low' => 'NA',
+				'pareto_fix_Phatci_up' => 'NA',
+				'pareto_random_Phat' 	=> 'NA',
+				'pareto_random_Phatci_low' =>  'NA',
+				'pareto_random_Phatci_up' =>  'NA',
+				'pareto_vegas_Phat'		=> 'NA',
+				'pareto_vegas_Phatci_low' =>  'NA',
+				'pareto_vegas_Phatci_up'	=> 'NA',
+			};
+			
+			if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
+				$simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$mnd_sim_wise_correction_methods); 
+			}
+			
+			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
+			$gene{$gn}->{pvalues}->min,
+			$simulated_p->{vegas},
+			$simulated_p->{sidak},
+			$simulated_p->{fisher},
+			$simulated_p->{z_fix},
+			$simulated_p->{z_random},
+			$z_based_p->{'I2'},
+			$z_based_p->{'Q'},
+			$z_based_p->{'Q_P'},
+			$z_based_p->{'tau_squared'},
+			$simulated_p->{wise_p},
+			$simulated_p->{wise_method},
+			$simulated_p->{N},
+			
+			$simulated_p->{'seen_vegas'}, # number of times stats was seen
+			$simulated_p->{'seen_sidak'},
+			$simulated_p->{'seen_fisher'},
+			$simulated_p->{'seen_fix'},
+			$simulated_p->{'seen_random'},
+			
+			$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
+			$simulated_p->{'pareto_vegas_Phatci_low'},
+			$simulated_p->{'pareto_vegas_Phatci_up'},
+			
+			$simulated_p->{'pareto_sidak_Phat'},
+			$simulated_p->{'pareto_sidak_Phatci_low'},
+			$simulated_p->{'pareto_sidak_Phatci_up'},
+			
+			$simulated_p->{'pareto_fisher_Phat'}, # fisher
+			$simulated_p->{'pareto_fisher_Phatci_low'},
+			$simulated_p->{'pareto_fisher_Phatci_up'},
+			
+			$simulated_p->{'pareto_fix_Phat'},# z fix
+			$simulated_p->{'pareto_fix_Phatci_low'},
+			$simulated_p->{'pareto_fix_Phatci_up'},
+			
+			$simulated_p->{'pareto_random_Phat'}, # z random
+			$simulated_p->{'pareto_random_Phatci_low'},
+			$simulated_p->{'pareto_random_Phatci_up'},
+			
+			$pvalue_based_p->{Meff_Galwey},
+			$pvalue_based_p->{Meff_gao},
+			scalar @{ $gene{$gn}->{geno_mat_rows} });
+			print $OUT "\n";
+		}
+		# delete the gene's data to keep memory usage low
+		delete($gene{$gn});
+		$count++;
+		&report_advance($count,$report,"Genes");	
+	
+	}
 } else {
   print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness",$LOG);
 }

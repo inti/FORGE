@@ -14,7 +14,7 @@ eval {
 	use PDL;
 	use PDL::Matrix;
 	use PDL::NiceSlice;
-	#use PDL::LinearAlgebra; # commented until re-implement the use of simulation to calculate p-values
+	use PDL::GSL::CDF;
 	use IO::File;
 	use IO::Seekable;
 	use Fcntl;
@@ -26,10 +26,33 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
-@EXPORT_OK = qw( build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
+@EXPORT = qw( extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
+@EXPORT_OK = qw( extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
 
 
+
+
+# extract stats from plink *.mperm.dump.all files
+sub extract_stats_from_mperm_dump_all_files {
+	my $file = shift;
+	open (DUMP,$file) or die$!;
+	my $data = [];
+	my $c = 0;
+	while (my $line = <DUMP>){
+		if ($c == 0){
+			$c++;
+			next;
+		}
+		chomp($line);
+		my @stats = split(/\s+/,$line);
+		my $chi = pdl @stats[1.. scalar @stats -1];
+		my $z = gsl_cdf_ugaussian_Pinv( gsl_cdf_chisq_P($chi,1) );
+		push @{$data},$z;
+		$c++;
+	}
+	$data = pdl $data;
+	return($data);
+}
 
 # usage: build_index(*DATA_HANDLE, *INDEX_HANDLE)
 sub build_index {

@@ -1294,9 +1294,8 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		} # close if exists
 	} # close foreach loop over snps
 } elsif (defined $mperm_dump){
-	
+	print_OUT("Reading SNP statistics from [ $mperm_dump ]",$LOG);
 	my $null_stats = extract_stats_from_mperm_dump_all_files($mperm_dump);
-	print join " ",$null_stats->dims,"\n";
 	foreach my $gn (keys %gene){
 		my $matrix = [];	
 		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
@@ -1942,6 +1941,7 @@ script [options]
 	-snpmap, -m		Snp-to-gene mapping file
 	-affy_to_rsid		Affy id to rs id mapping file
 	-gmt			Gene-set definition file
+	-stats_dump		File with statistics produce by phenotype permutations. File format as per PLINK, i.e. *.mperm.dump.all files.
 
 	Output Files:
 	-out, -o		Name of the output file
@@ -2040,6 +2040,11 @@ SNP_A-8389091	rs7593668
 Gene-set definition file. Format is (tab separated) 
 NAME	Description	GENE1	GENE2	GENEN
  
+=item B<-stats_dump>
+ 
+File with statistics produce by phenotype permutations. File format as per PLINK, i.e. *.mperm.dump.all files.
+If you provide this file you do not need to provide a genotype file. It is assumed that SNP statistics in the *.mperm.dump.all are in the same order of the SNP association file (--assoc/-a option).
+
 =item B<-out, -o>
 
 Name of the output file. Output file will be tab separated with the following columns: Ensembl_ID,Hugo id,gene_type,chromosome,start,end,min p-value in the gene, Sidak corrected minimum p-value, FORGE p-value, FORGE chi-square, FORGE degrees of freedom, Eigen value ratio method gene p-value, EVR chi-square, EVR degrees freedom, number of snps in gene, number effective tests(Gao et al;PDMID:19434714)
@@ -2174,7 +2179,11 @@ To perform a basic gene-based analysis and estimate significance by simulation
  
 >perl forge.pl -bfile example/example -assoc example/example.assoc -snpmap example/example.snpmap -out test -mnd
 
-=item B<4. Running a whole-genome analysis>
+=item B<4. Using permutation statistics to estimate SNP-SNP correlations>
+ 
+>perl forge.pl -stats_dump example/example.mperm.dump.all -a example/example.assoc -o test -m example/example.snpmap
+
+=item B<5. Running a whole-genome analysis>
 
 To perform a whole-genome analysis using our SNP-to-gene annotation files. Please note we do not provide example files for this.
 The # symbol in the SNP-to-gene annotation file name means "analyse from chromosome 1 to 26".

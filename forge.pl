@@ -1297,10 +1297,11 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 	print_OUT("Reading SNP statistics from [ $mperm_dump ]",$LOG);
 	my $null_stats = extract_stats_from_mperm_dump_all_files($mperm_dump);
 	foreach my $gn (keys %gene){
-		my $matrix = [];	
+		my $matrix = [];
+		my $indexes = [];
 		foreach my $mapped_snp (@{$gene{$gn}->{snps}}){
 			next if (not exists $assoc_data{ $mapped_snp } );	
-			push @{ $matrix }, $null_stats->($assoc_data{ $mapped_snp }->{line},)->flat;
+			push @{ $indexes}, $assoc_data{ $mapped_snp }->{line};
 			# add snp id to matrix row names
 			push @{ $gene{$gn}->{geno_mat_rows} }, $mapped_snp;
 			# store the p-value of the snp
@@ -1322,8 +1323,9 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 				}
 			}
 		}
+		$indexes = flat pdl $indexes;
 		# generate the genotype matrix as a PDL piddle
-		$gene{$gn}->{genotypes} = pdl $matrix;
+		$gene{$gn}->{genotypes} = $null_stats->($indexes,)->transpose;
 		($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r})  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);
 		# Calculate the weights for the gene
 		$gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);

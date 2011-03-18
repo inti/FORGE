@@ -26,7 +26,7 @@ our (	$help, $man, $gmt, $pval,
 	$gs_coverage,$snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
 	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list,
-	$mnd,$mnd_N,$gene_p_type
+	$mnd,$mnd_N,$gene_p_type,$gc_correction
 );
 
 GetOptions(
@@ -61,6 +61,7 @@ GetOptions(
 	'mnd' => \$mnd,
 	'mnd_n=i' => \$mnd_N,
 	'gene_p_type' => \$gene_p_type,
+    'gc_correction' => \$gc_correction,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -122,7 +123,7 @@ print_OUT("Reading gene stats [ $pval ]",$LOG);
 open( PVAL, $pval ) or die $!;
 while (my $line = <PVAL>) {
 	chomp($line);
-	my ( $gn, $p ) = split( /\t/, $line );
+	my ( $gn, $p ) = split( /[\t+\s+]/, $line );
 	$gn = lc($gn);
 	if (defined $ref_list){
 		next if (not exists $ref_genes{$gn});
@@ -426,6 +427,37 @@ if (defined $all_are_background) {
 print_OUT("  '-> [ " . scalar $background_values->list() . " ] genes will be used to calculate the patameters of null",$LOG);
 $background_values->inplace->setvaltobad( "inf" );
 $background_values->inplace->setvaltobad( "-inf" );
+
+if (defined $gc_correction){
+    print_OUT("Calculating lambda for genomic control correction",$LOG);
+    my $assoc_p =   gsl_cdf_ugaussian_P(-1*$background_values );
+	my $gc_lambda = get_lambda_genomic_control($assoc_p);
+    print_OUT("   '-> lambda (median) of [ $gc_lambda ]",$LOG);
+    if ($gc_lambda > 1){
+        print_OUT("   '-> Applying GC correction",$LOG);
+        my @genes_to_correct = ();
+        if (defined $all_are_background) {
+            @genes_to_correct = keys %gene_data;
+        } else {
+            @genes_to_correct = keys %genes_in_paths;
+        }
+        $assoc_p = [];
+        foreach my $gn (@genes_to_correct) {
+            my $g_p = gsl_cdf_ugaussian_P(-1*$gene_data{$gn}->{stat});
+            my $g_chi = gsl_cdf_chisq_Pinv(1 - $g_p,1);
+            $g_chi /=  $gc_lambda;
+            $g_p = 1 - gsl_cdf_chisq_P( $g_chi, 1);
+            push @{$assoc_p}, $g_p;
+            $gene_data{$gn}->{stat} = -1*gsl_cdf_ugaussian_Pinv($g_p);
+        }
+        $assoc_p = pdl $assoc_p;
+        $gc_lambda = get_lambda_genomic_control($assoc_p);
+        print_OUT("   '-> After correction the lambda is [ $gc_lambda ]",$LOG);
+    } else {
+		print_OUT("   '-> GC correction not applied because lambda is less than 1",$LOG);
+	}
+}
+
 my $mu = $background_values->davg;
 # sd of all stats across the genome
 my $sd = $background_values->stdv;

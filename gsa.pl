@@ -1202,30 +1202,21 @@ script [options]
 	
 	Analysis modifiers
  	-set_stat		statistics to calculate over the sub-networks
+    -gc_correction		Determine the lamda for the genomic control correction from the input p-values
 	-z_score		input values are z_scores (the absolute values will be used)
-	-cgnets			File with gene ids. Only gene-sets that contain them will be analyzed.
-	-cgnets_all		Set all genes in gene-sets as CGNets seed. it basically runs the CGNets analysis for all genes.
-	-Neff_gene_sets		Calculate the number effective gene-sets being analysed.
 	-gs_coverage		number [0,1]. Fraction of the gene-set that must be covered by the
 				experiment for the gene set to be considered in the analysis
-	-recomb_intervals	correct for genes that are in the same recombination interval
-	-interval_merge		Integer. Recombination intervals closer than this number will be merge. It is helpfull to
-				assess the effect of residual long range LD. It can be very strict if you use a large number.
-	-interval_merge_by_chr	Same as before but will define a whole chromosome as the interval. It is the extreme of the
-				previous option and overrides it.
-	-best_per_interval	Used by default if recomb_intervals is used. If two or more genes are in the
-				same recombination interval, the one with the best statistic will be selected. This behavior
-				will be mantained on the permutation sampling to calculate the null. No permutation will be run
-				with this option, I may fix this in the feature.
 	
+     Multivariate Normal Distribution sampling
+     -mnd			Estimate significance by sampling from a multivatiate normal distribution
+     -mnd_N         Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
+ 
 	Output modifiers:
  	-append			Append results to output file rather than overwrite it
  	-add_file_name		add the input file name to the result
 
 	Permutations:
 	-perm			number of permutations
-	-complete_interval_sampling	Implements a method to correct for recombination intervals but using all
-					statistics in the recombination interval.
 
 =head1 OPTIONS
 
@@ -1277,18 +1268,6 @@ max gene-set size
 
 min gene-set size
 
-=item B<-recomb_intervals>
-
-correct for genes that are in the same recombination interval. On GWAS analysis one would often derive one p-value per genes and these will be correlated if the genetic variants on different genes are in Linkage Desequilibrium, as for example when genes lay on the same recombination interval (pice of genome between two recombination hot-spots). The proble is that the statistics calculated across the sub-network asssume that the gene p-values are independent. With this option is possible to provide a set of genomic interval that group genes, e.g. recombination interval. This information will be use during the MC sampling. For example, if we have a network with 10 genes, 5 of which lay on the same recombination interval. With the -recomb_intervals option set on the montecarlo sampling 5 of the genes will be obtain from a single recombination interval (elsewhere in the genome), thus assuring the genetic structure in the subnetwotk is somehow preserved. 
-
-=item B<-interval_merge>
-
-Integer. Recombination intervals closer than this number will be merge. It is helpfull to assess the effect of residual long range LD. It can be very strict if you use a large number.
-
-=item B<-interval_merge_by_chr>
-
-Same as before but will define a whole chromosome as the interval. It is the extreme of the previous option and overrides it.
-
 =item B<-z_score>
 
 Input values are z_score intead of p-values, for calculations the absolute value of the z-score will be taken. Permutations must be performed together with this option.
@@ -1309,26 +1288,17 @@ set reference list for the analysis
 
 statistics to calculate over the sub-networks. options are stouffer_z_score and mean. mean if the default
 
+=item<-gc_correction>
 
-=item B<-best_per_interval>
+Determine the lamda for the genomic control correction from the input p-values
 
-Used by default if recomb_intervals is used. If two or more genes are in the same recombination interval, the one with the best statistic will be selected. This behavior will be mantainedon the permutation sampling to calculate the null.
+=item<-mnd>
 
-=item B<-complete_interval_sampling>
+Estimate significance by sampling from a multivatiate normal distribution
 
-Implements a method to correct for recombination intervals but using all statistics in the recombination interval.
-
-=item B<-cgnets>
-
-Implements the CGNet analysis. It receives a list of genes and will restric the analysis to gene-sets that contain them.
-
-=item B<-cgnets_all>
-
-Set all genes in gene-sets as CGNets seed. it basically runs the CGNets analysis for all genes.
-
-=item B<-Neff_gene_sets>
-
-Calculate the number effective gene-sets being analysed. It can be quite slow is many pathways are under analysis but it will finish in a reasinable time. It is quite useful when performing the CGNets analysis.
+=item<-mnd_N>
+ 
+Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
 
 =back
 

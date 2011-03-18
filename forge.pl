@@ -19,6 +19,7 @@ use GWAS_IO;
 use GWAS_STATS;
 use CovMatrix;
 
+# declare global variables. mainly command line options
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,

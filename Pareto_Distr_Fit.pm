@@ -93,7 +93,10 @@ sub gpdPval {
 	my $par = pdl $a,$k;
 	$reapmat = $reapmat * $par; 
 
-	my $chol = mchol($cov);
+    
+    my ($cov_checked,$status) = check_positive_definite($cov,1e-8);
+
+	my $chol = mchol($cov_checked);
 	my $Q = ($gaussian_random_mat  x $chol->transpose ) + $reapmat;
 	my $sample =  1 - gsl_cdf_pareto_P($x0,$Q->(0,),$Q->(1,));
 	$sample->inplace->setnantobad;

@@ -10,9 +10,9 @@ use PDL::NiceSlice;
 use PDL::Stats::Basic;
 use PDL::Bad;
 use Data::Dumper;
-use Carp qw( confess );
-$SIG{__DIE__} =  \&confess;
-$SIG{__WARN__} = \&confess;
+#use Carp qw( confess );
+#$SIG{__DIE__} =  \&confess;
+#$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;

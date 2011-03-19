@@ -9,6 +9,8 @@ use PDL::Stats::Basic;
 use PDL::Stats::Distr;
 use PDL::LinearAlgebra qw(mchol);
 use PDL::GSL::INTERP;
+use CovMatrix;
+
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 

@@ -895,7 +895,6 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
   if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
   # loop over all genes and extract the genotypes of the SNPs
   foreach my $gn (keys %gene){
-    print "$gn\n";
     # this will store the genotypes
     my $matrix;
     # loop over the snps mapped to the gene

@@ -7,7 +7,7 @@ use PDL::NiceSlice;
 use PDL::GSL::CDF;
 use PDL::Stats::Basic;
 use PDL::Stats::Distr;
-use PDL::LinearAlgebra qw(mchol);
+use PDL::LinearAlgebra qw(mchol msymeigen);
 use PDL::GSL::INTERP;
 use CovMatrix;
 
@@ -95,7 +95,6 @@ sub gpdPval {
 	my $par = pdl $a,$k;
 	$reapmat = $reapmat * $par; 
 
-    
     my ($cov_checked,$status) = check_positive_definite($cov,1e-8);
 
 	my $chol = mchol($cov_checked);

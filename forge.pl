@@ -10,9 +10,9 @@ use PDL::NiceSlice;
 use PDL::Stats::Basic;
 use PDL::Bad;
 use Data::Dumper;
-#use Carp qw( confess );
-#$SIG{__DIE__} =  \&confess;
-#$SIG{__WARN__} = \&confess;
+use Carp qw( confess );
+$SIG{__DIE__} =  \&confess;
+$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;
@@ -895,7 +895,7 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
   if (($N_bytes_to_encode_snp - int($N_bytes_to_encode_snp)) != 0  ){ $N_bytes_to_encode_snp = int($N_bytes_to_encode_snp) + 1;}
   # loop over all genes and extract the genotypes of the SNPs
   foreach my $gn (keys %gene){
-	  
+    print "$gn\n";
     # this will store the genotypes
     my $matrix;
     # loop over the snps mapped to the gene
@@ -1542,11 +1542,13 @@ sub simulate_mnd {
 	my $z_random = shift;
 	my $gene_data = shift; # hash ref with gene informatio
 	my $compare_wise_p = shift; # ARRAY ref
-		
+    
+    if ($MAX < 1000) { $MAX = 1000; }
 	my $max_step_size = 100_000;
 	my $total = 0;
-	my $step= 1000;
-
+    #	my $step= 1000;
+    my $step= 300;
+    if ($step > $MAX) { $step = $MAX; }
 	my ($cov,$status) = check_positive_definite($gene_data->{cor},1e-8);
 	if ($status == 1){
 		print "Matrix never positive definite $gene_data->{ensembl}\t$gene_data->{hugo}\t",scalar @{$gene_data->{'geno_mat_rows'}},"\n";

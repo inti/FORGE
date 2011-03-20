@@ -74,24 +74,28 @@ sub pvt_check_w {
 }
 
 sub make_positive_definite {
-	
 	my ($m, $tol) = @_; 
 	my $d = $m->getdim(1);
 	if ($m->getdim(1) != $m->getdim(0)) { die("Input matrix is not square!"); }
-	my ($es,$esv) = eigens $m;
-	if (not defined $tol){ $tol = $d * max(abs($esv)) * 2e-16; }
+	my ($esv,$es) = msymeigen($m,0,1);
+    if (not defined $tol){ $tol = $d * max(abs($esv)) * 2e-16; }
 	my $delta = 2 * $tol;
 	my $tau = $delta - $esv;
 	$tau->( which($tau < 0) ) .= 0;
 	my $dm = $es x stretcher($tau) x transpose($es);
-	return($m + $dm)
+    $dm = PDL::Complex::real($dm);
+    my $back = $m + $dm;
+	return($back);
 }
 
 
 sub is_positive_definite {
 	my $m = shift;
 	my $tol = shift;
-	my ($es,$esv) = eigens $m;
+    # print "IN is_positive_definite\n";
+    #print $m;
+    #getc;
+	my ($esv,$es) = msymeigen($m,0,1);
 	if (not defined $tol){ $tol = $m->getdim(0) * max(abs($esv)) * 2e-8; }
 	if ( sum($esv > $tol) == scalar( $esv->list) ) {
 		return(0);
@@ -349,9 +353,9 @@ sub check_positive_definite {
 		if ($i > 25){
 			last;
 		}
-		my ($es,$esv) = eigens $cov;
+		my ($esv,$es) = msymeigen($cov,0,1);
 		$cov = make_positive_definite($cov,$tol);
-		($es,$esv) = eigens $cov;
+		($esv,$es) = msymeigen($cov,0,1);
 		eval { mchol ($cov) };
 	}
 	

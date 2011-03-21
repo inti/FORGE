@@ -349,7 +349,7 @@ if (defined $snpmap){
 			print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG);
 			next;
 		}
-		my $MAP = new IO::Handle;
+		my $MAP = new IO::File;
 		print_OUT ("   '-> Reading [ $snp_gene_mapping_file ]",$LOG);
 		$MAP->open("$snp_gene_mapping_file");
 		while (my $read = $MAP->getline()) {

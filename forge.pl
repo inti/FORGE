@@ -28,7 +28,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
-	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump
+	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump,$asymp
 );
 
 GetOptions(
@@ -73,6 +73,7 @@ GetOptions(
 	'mnd_max=i' => \$mnd_sim_max,
 	'mnd_methods=s' => \$mnd_sim_wise_correction_methods,
 	'stats_dump=s' => \$mperm_dump,
+    'asymp|asymptotic' => \$asymp,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -92,6 +93,12 @@ defined $mnd_sim_max or $mnd_sim_max = 100_000;
 if (defined $mnd_sim_wise_correction_methods){
 	$mnd_sim_wise_correction_methods = [ split(/\,/,$mnd_sim_wise_correction_methods) ];
 } else { $mnd_sim_wise_correction_methods = [0,1,2,3]; }
+
+if (not defined $asymp) {
+    $mnd = 1;
+} else {
+	print_OUT("Will calculate gene p-value using asymptotic methods",$LOG);
+}
 
 if (defined $mnd){
 	use PDL::LinearAlgebra qw (mchol);
@@ -175,11 +182,10 @@ if (not defined $mnd){
 	print $OUT "\tn_effect_Galwey\tn_effect_Gao\tn_snps\n";
 } else { # header for asymptotic analysis
 	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
-	print $OUT "\tmin_p\tVEGAS\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_FIX\tSIM_Z_RANDOM";
+	print $OUT "\tmin_p\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_FIX\tSIM_Z_RANDOM";
 	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
 	print $OUT "\tSIM_BEST_P\tSIM_BEST_method\tN_SIM";
-	print $OUT "\tSEEN_VEGAS\tSEEN_SIDAK\tSEEN_FISHER\tSEEN_Z_FIX\tSEEN_RANDOM";
-	print $OUT "\tGPD_VEGAS\tGPD_VEGAS_LOW\tGPD_VEGAS_UP";
+	print $OUT "\tSEEN_SIDAK\tSEEN_FISHER\tSEEN_Z_FIX\tSEEN_RANDOM";
 	print $OUT "\tGPD_SIDAK\tGPD_SIDAK_LOW\tGPD_SIDAK_UP";
 	print $OUT "\tGPD_FISHER\tGPD_FISHER_LOW\tGPD_FISHER_UP";
 	print $OUT "\tGPD_Z_FIX\tGPD_Z_FIX_LOW\tGPD_Z_FIX_UP";
@@ -810,7 +816,6 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			
 			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 			$gene{$gn}->{pvalues}->min,
-			$simulated_p->{vegas},
 			$simulated_p->{sidak},
 			$simulated_p->{fisher},
 			$simulated_p->{z_fix},
@@ -823,17 +828,12 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			$simulated_p->{wise_method},
 			$simulated_p->{N},
 			
-			$simulated_p->{'seen_vegas'}, # number of times stats was seen
-			$simulated_p->{'seen_sidak'},
+			$simulated_p->{'seen_sidak'},# number of times stats was seen
 			$simulated_p->{'seen_fisher'},
 			$simulated_p->{'seen_fix'},
 			$simulated_p->{'seen_random'},
-			
-			$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
-			$simulated_p->{'pareto_vegas_Phatci_low'},
-			$simulated_p->{'pareto_vegas_Phatci_up'},
-			
-			$simulated_p->{'pareto_sidak_Phat'},
+					
+			$simulated_p->{'pareto_sidak_Phat'}, # sidak
 			$simulated_p->{'pareto_sidak_Phatci_low'},
 			$simulated_p->{'pareto_sidak_Phatci_up'},
 			
@@ -1037,7 +1037,6 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		
 	  print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 		  $gene{$gn}->{pvalues}->min,
-		  $simulated_p->{vegas},
 		  $simulated_p->{sidak},
 		  $simulated_p->{fisher},
 		  $simulated_p->{z_fix},
@@ -1050,16 +1049,11 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 		  $simulated_p->{wise_method},
 		  $simulated_p->{N},
 	  
-		  $simulated_p->{'seen_vegas'}, # number of times stats was seen
-		  $simulated_p->{'seen_sidak'},
+		  $simulated_p->{'seen_sidak'}, # number of times stats was seen
 		  $simulated_p->{'seen_fisher'},
 		  $simulated_p->{'seen_fix'},
 		  $simulated_p->{'seen_random'},
-	  
-		  $simulated_p->{'pareto_vegas_Phat'}, # VEGAS
-		  $simulated_p->{'pareto_vegas_Phatci_low'},
-		  $simulated_p->{'pareto_vegas_Phatci_up'},
-	  
+	   
 		  $simulated_p->{'pareto_sidak_Phat'},
 		  $simulated_p->{'pareto_sidak_Phatci_low'},
 		  $simulated_p->{'pareto_sidak_Phatci_up'},
@@ -1227,7 +1221,6 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 						
 						print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 						$gene{$gn}->{pvalues}->min,
-						$simulated_p->{vegas},
 						$simulated_p->{sidak},
 						$simulated_p->{fisher},
 						$simulated_p->{z_fix},
@@ -1240,16 +1233,11 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 						$simulated_p->{wise_method},
 						$simulated_p->{N},
 						
-						$simulated_p->{'seen_vegas'}, # number of times stats was seen
-						$simulated_p->{'seen_sidak'},
+						$simulated_p->{'seen_sidak'},# number of times stats was seen
 						$simulated_p->{'seen_fisher'},
 						$simulated_p->{'seen_fix'},
 						$simulated_p->{'seen_random'},
-						
-						$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
-						$simulated_p->{'pareto_vegas_Phatci_low'},
-						$simulated_p->{'pareto_vegas_Phatci_up'},
-						
+											
 						$simulated_p->{'pareto_sidak_Phat'},
 						$simulated_p->{'pareto_sidak_Phatci_low'},
 						$simulated_p->{'pareto_sidak_Phatci_up'},
@@ -1412,7 +1400,6 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			
 			print $OUT join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
 			$gene{$gn}->{pvalues}->min,
-			$simulated_p->{vegas},
 			$simulated_p->{sidak},
 			$simulated_p->{fisher},
 			$simulated_p->{z_fix},
@@ -1425,15 +1412,10 @@ if (defined $geno_probs) { # in case not plink binary files provided and only a 
 			$simulated_p->{wise_method},
 			$simulated_p->{N},
 			
-			$simulated_p->{'seen_vegas'}, # number of times stats was seen
-			$simulated_p->{'seen_sidak'},
+			$simulated_p->{'seen_sidak'},# number of times stats was seen
 			$simulated_p->{'seen_fisher'},
 			$simulated_p->{'seen_fix'},
-			$simulated_p->{'seen_random'},
-			
-			$simulated_p->{'pareto_vegas_Phat'}, # VEGAS
-			$simulated_p->{'pareto_vegas_Phatci_low'},
-			$simulated_p->{'pareto_vegas_Phatci_up'},
+			$simulated_p->{'seen_random'},			
 			
 			$simulated_p->{'pareto_sidak_Phat'},
 			$simulated_p->{'pareto_sidak_Phatci_low'},

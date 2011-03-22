@@ -94,9 +94,9 @@ foreach my $file (@$in_files) {
 	push @studies, $st; # store the name of this study for the print out.
 	# print out some infor about the information read in the file
 	print_OUT("Reading [ $file ]");
-	print_OUT("   '-> Variables in col [ $st_w_col ]") if (defined $w_col);
+	print_OUT("   '-> Variables weights in col [ $st_w_col ]") if (defined $w_col);
+	print_OUT("   '-> Variables stat in col [ $st_stat_col ]") if (defined $stat_col);
 	print_OUT("   '-> Study weight [ $st_w ]") if (defined $w);
-	print_OUT("   '-> Study stat in col [ $st_stat_col ]") if (defined $stat_col);
 
 	open( IN, $file ) or print_OUT("I cannot open file [ $file ]\n") and die $!;
 	my $counter = 0;
@@ -111,7 +111,7 @@ foreach my $file (@$in_files) {
 		# set the variable weight to the var of the study
 		my $var_w = double $st_w;
 		# modify the vartiable weight if a columns with its variance is given
-		$var_w /= $d[ $st_w_col -1 ] if ( defined $w_col );
+		$var_w += double $d[ $st_w_col -1 ] if ( defined $w_col );
 		$var_w = sclr $var_w; # make a perl scalar to simply calculations later
 		# get the variable stat
 		my $var_stat = $d[ $st_stat_col - 1 ]; 

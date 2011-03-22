@@ -574,7 +574,7 @@ if (defined $append){
 		print OUT "\tZ_fix\tV_fix\tZ_P_fix\tZ_random\tV_random\tZ_P_random\tI2\tQ\tQ_P\ttau_squared";
 		if (defined $mnd){
 			print OUT "\tSIM_Z_FIX\tSIM_Z_RANDOM\tSEEN_FIX\tSEEN_RANDOM\tN\tpareto_fix_Phat\tpareto_fix_Phatci_low\tpareto_fix_Phatci_up\tpareto_random_Phat\tpareto_random_Phatci_low\tpareto_random_Phatci_up";			
-		}
+		} 
 	}
 	if (defined $perm){
 		print OUT ("\tempi_p:$set_stat\tempi_z:$set_stat\tmean_set\tmean_null\tsd_null");
@@ -609,30 +609,45 @@ while (my $p = shift @pathways) {
 		my $se = $z->nelem * ones $z->nelem;
 		my $Z_STATS = get_fix_and_radom_meta_analysis($z,$se,undef,$p->{gene_cor_mat});
 		my $num = 100;
-		my $simulated_set_stats = simulate_mnd_gene_set($p,$Z_STATS,10,$mnd_N);
-		printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e", 
-			$Z_STATS->{'B_fix'},
-			$Z_STATS->{'V_fix'},
-			$Z_STATS->{'Z_P_fix'},
-			$Z_STATS->{'B_random'},
-			$Z_STATS->{'V_random'},
-			$Z_STATS->{'Z_P_random'},
-			$Z_STATS->{'I2'},
-			$Z_STATS->{'Q'},
-			$Z_STATS->{'Q_P'},
-			$Z_STATS->{'tau_squared'},
-			$simulated_set_stats->{'z_fix'},
-			$simulated_set_stats->{'z_random'},
-			$simulated_set_stats->{'seen_fix'},
-			$simulated_set_stats->{'seen_random'},
-			$simulated_set_stats->{'N'},
-			$simulated_set_stats->{'pareto_fix_Phat'},
-			$simulated_set_stats->{'pareto_fix_Phatci_low'},
-			$simulated_set_stats->{'pareto_fix_Phatci_up'},
-			$simulated_set_stats->{'pareto_random_Phat'},
-			$simulated_set_stats->{'pareto_random_Phatci_low'},
-			$simulated_set_stats->{'pareto_random_Phatci_up'},
-		);
+        if (defined $mnd){
+            my $simulated_set_stats = simulate_mnd_gene_set($p,$Z_STATS,10,$mnd_N);
+            printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.2f\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e", 
+                $Z_STATS->{'B_fix'},
+                $Z_STATS->{'V_fix'},
+                $Z_STATS->{'Z_P_fix'},
+                $Z_STATS->{'B_random'},
+                $Z_STATS->{'V_random'},
+                $Z_STATS->{'Z_P_random'},
+                $Z_STATS->{'I2'},
+                $Z_STATS->{'Q'},
+                $Z_STATS->{'Q_P'},
+                $Z_STATS->{'tau_squared'},
+                $simulated_set_stats->{'z_fix'},
+                $simulated_set_stats->{'z_random'},
+                $simulated_set_stats->{'seen_fix'},
+                $simulated_set_stats->{'seen_random'},
+                $simulated_set_stats->{'N'},
+                $simulated_set_stats->{'pareto_fix_Phat'},
+                $simulated_set_stats->{'pareto_fix_Phatci_low'},
+                $simulated_set_stats->{'pareto_fix_Phatci_up'},
+                $simulated_set_stats->{'pareto_random_Phat'},
+                $simulated_set_stats->{'pareto_random_Phatci_low'},
+                $simulated_set_stats->{'pareto_random_Phatci_up'},
+            );
+        } else {
+            printf OUT ("\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3e\t%.3f\t%.3e\t%.3e\t%.3e", 
+            $Z_STATS->{'B_fix'},
+            $Z_STATS->{'V_fix'},
+            $Z_STATS->{'Z_P_fix'},
+            $Z_STATS->{'B_random'},
+            $Z_STATS->{'V_random'},
+            $Z_STATS->{'Z_P_random'},
+            $Z_STATS->{'I2'},
+            $Z_STATS->{'Q'},
+            $Z_STATS->{'Q_P'},
+            $Z_STATS->{'tau_squared'},
+            );
+        }
 		
 	}
 	
@@ -680,6 +695,8 @@ sub simulate_mnd_gene_set {
 	my $set_stats = shift; # HASH ref
 	my $target = shift;
 	my $MAX = shift;
+    
+    defined $MAX or $MAX = 1_000_000;
 	
 	my $max_step_size = 10_000;
 	my $total = 0;

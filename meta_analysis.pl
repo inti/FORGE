@@ -111,7 +111,17 @@ foreach my $file (@$in_files) {
 		# set the variable weight to the var of the study
 		my $var_w = double $st_w;
 		# modify the vartiable weight if a columns with its variance is given
-		$var_w += double $d[ $st_w_col -1 ] if ( defined $w_col );
+		if ( defined $w_col){
+			if ( $st_w_col > scalar @d) {
+				print_OUT("Variable weight columns number is greater than number of columns: [ $st_w_col ] > [ " . scalar @d . " ]");
+				print_OUT("Finishing execution\n");
+				print_OUT("Problem found at line [ $. ] : >> $line <<");
+				exit(1);
+			}
+			if ($d[ $st_w_col -1 ] != 0){
+				$var_w /= double $d[ $st_w_col -1 ];
+			}
+		}
 		$var_w = sclr $var_w; # make a perl scalar to simply calculations later
 		# get the variable stat
 		my $var_stat = $d[ $st_stat_col - 1 ]; 

@@ -1545,8 +1545,7 @@ sub simulate_mnd {
     if ($MAX < 1000) { $MAX = 1000; }
 	my $max_step_size = 100_000;
 	my $total = 0;
-    #	my $step= 1000;
-    my $step= 300;
+    	my $step= 1000;
     if ($step > $MAX) { $step = $MAX; }
 	my ($cov,$status) = check_positive_definite($gene_data->{cor},1e-8);
 	if ($status == 1){

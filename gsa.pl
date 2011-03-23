@@ -26,7 +26,7 @@ our (	$help, $man, $gmt, $pval,
 	$gs_coverage,$snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
 	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list,
-	$mnd,$mnd_N,$gene_p_type,$gc_correction
+	$mnd,$mnd_N,$gene_p_type,$gc_correction, $mnd_gene_corr
 );
 
 GetOptions(
@@ -59,6 +59,7 @@ GetOptions(
 	'gene_cor_max_dist=i' => \$gene_cor_max_dist,
 	'print_ref_list' => \$print_ref_list,
 	'mnd' => \$mnd,
+    'mnd_gene_corr' => \$mnd_gene_corr,
 	'mnd_n=i' => \$mnd_N,
 	'gene_p_type' => \$gene_p_type,
     'gc_correction' => \$gc_correction,
@@ -530,7 +531,7 @@ if (defined $bfile){
 		$p->{stats} = [ @stats ];
 		$p->{N_in} = scalar @{ $p->{genes} };
 		my ($more_corr,$more_var,$G_cor) = "";
-		($p->{gene_cor_mat},$more_corr,$more_var,$G_cor) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist,$mnd,1000,$gene_p_type);
+		($p->{gene_cor_mat},$more_corr,$more_var,$G_cor) = calculate_gene_corr_mat($p->{genes},\%gene_data,\%correlation_stack,\%gene_genotype_var,$quick_gene_cor,$gene_cor_max_dist,$mnd_gene_corr,1000,$gene_p_type);
 		$p->{ genotypes_corr } = ${ $G_cor };
 		%correlation_stack = ( %correlation_stack, %{$more_corr} );
 		%gene_genotype_var = ( %gene_genotype_var, %{$more_var} );
@@ -815,7 +816,7 @@ sub calculate_gene_corr_mat {
 	my $var = shift; # HASH ref
 	my $quick_cor = shift; # 0,1
 	my $max_gene_dist = shift; # integer	
-	my $mnd= shift; # 0,1
+	my $mnd_gene_corr = shift; # 0,1
 	my $mnd_N = shift; # integer
 	my $gene_p_type = shift; # 0,1
 	
@@ -825,7 +826,7 @@ sub calculate_gene_corr_mat {
 	
 	# define correlation matrix
 	my $corr = stretcher(ones scalar @$genes); 
-	if (defined $mnd){
+	if (defined $mnd_gene_corr){
 		my $G = null;
 		my $genotypes_stack = [];
 		my @mat_gene_idx = ();
@@ -952,15 +953,13 @@ sub calculate_gene_corr_mat {
 					set $corr, $j ,$i, $gene_gene_corr->{ $gn_i }{ $gn_j };
 					next;
 				}
-				# get indexes for its SNPs in the snp correlation matrix
-				my $idx_j = $gene_data->{ $gn_i }->{genotypes}->getdim(1) + sequence $gene_data->{ $gn_j }->{genotypes}->getdim(1);
 				# get its variance if it has not been calculated already
 				if (not exists $var->{ $gn_j }){
 					$var->{ $gn_j } =  get_genotype_matrix_var($gene_data->{ $gn_j }->{genotypes});
 					$new_vars{ $gn_j } = $var->{ $gn_j };
 				}
 				
-				# combine the genotype data information
+=head  code replaced for more accurate correlation estimation.              
 				my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
 				for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
 					my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
@@ -973,10 +972,16 @@ sub calculate_gene_corr_mat {
 						
 					}
 				}
+=cut                
+				# combine the genotype data information
+                my $G = $gene_data->{ $gn_i }->{genotypes}->glue(1, $gene_data->{ $gn_j }->{genotypes});
+                my $G_corr = cov_shrink($G->transpose);
+                my $idx_i = $gene_data->{ $gn_i }->{genotypes}->getdim(1);
+                my $idx_j = $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+                my $r_i_j = $G_corr->{cor}->(0:$idx_i-1,$idx_i:$idx_i+$idx_j-1);
 				my $c_i_j = double $r_i_j->dsum()/sqrt( $var->{ $gn_i } * $var->{ $gn_j }  );
 				set $corr, $i ,$j, $c_i_j;
 				set $corr, $j ,$i, $c_i_j;
-				
 				$new_corrs{$gn_j}{$gn_i} = $new_corrs{$gn_i}{$gn_j} = $c_i_j;
 			}
 		}
@@ -1227,7 +1232,8 @@ script [options]
      Multivariate Normal Distribution sampling
      -mnd			Estimate significance by sampling from a multivatiate normal distribution
      -mnd_N         Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
- 
+     -mnd_gene_corr Calculate the correlation between gene-statistics from by simulattions 
+
 	Output modifiers:
  	-append			Append results to output file rather than overwrite it
  	-add_file_name		add the input file name to the result
@@ -1305,17 +1311,22 @@ set reference list for the analysis
 
 statistics to calculate over the sub-networks. options are stouffer_z_score and mean. mean if the default
 
-=item<-gc_correction>
+=item B<-gc_correction>
 
 Determine the lamda for the genomic control correction from the input p-values
 
-=item<-mnd>
+=item B<-mnd>
 
 Estimate significance by sampling from a multivatiate normal distribution
 
-=item<-mnd_N>
+=item B<-mnd_N>
  
 Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
+
+ 
+=item B <-mnd_gene_corr>
+ 
+Calculate the correlation between gene-statistics from by simulattions 
 
 =back
 

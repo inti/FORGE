@@ -4,18 +4,18 @@ use Bio::EnsEMBL::Registry;
 use Data::Dumper;
 use Getopt::Long;
 
-our ( $Usage, $help, $out, @chr, $shift);
+our ( $Usage, $help, $out, $chr, $shift);
 
 GetOptions(
    'help|h'    => \$help,
    'out|o=s'   => \$out, #name of the output file
-   'chr=i{0,100}'  => \@chr,
+   'chr=i@'  => \$chr,
    'window_size|w=i' => \$shift,
 );
 
 my $VERSION = "0.1";
 print "SNP-to-gene annotation script version [ $VERSION ]\n";
-defined @chr or @chr = (1..22,'X','Y','MT');
+defined $chr or @{ $chr } = (1..22,'X','Y','MT');
 defined $out or die("please give the name of the output file (you forgot option -o !!!!)\n");
 open (OUT,">$out") or die $!;
 
@@ -46,7 +46,7 @@ warn "Fetching Information from Ensembl Version ", $reg->software_version(),"\n"
 my @annot;
 my $size = undef;
 
-foreach my $c (@chr) {
+foreach my $c (@{ $chr }) {
    if ($c == 23){ $c = 'X'}
    elsif ($c == 24){ $c = 'Y'}
    elsif ($c == 26){ $c = 'MT'}

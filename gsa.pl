@@ -701,8 +701,8 @@ sub simulate_mnd_gene_set {
 	
 	my $max_step_size = 10_000;
 	my $total = 0;
-	my $step=100;
-	
+	my $step=300;
+	if ($step >  $MAX) { $MAX = $step; }
 	my $se = $gene_set_data->{gene_cor_mat}->getdim(0) * ones $gene_set_data->{gene_cor_mat}->getdim(0);
 	my $SEEN = zeroes 2;
 	

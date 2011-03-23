@@ -29,8 +29,8 @@ GetOptions(
 	'stat_or'			=> \$stat_or,
 	'header'			=> \$header,
 	'min_studies|min_st=i' => \$min_studies,
-	'gc_correction=i@'		=> \$gc_correction,
-	'gc_correction_all'		=> \$gc_correction_all,
+	'gc_correction|gc=i@'		=> \$gc_correction,
+	'gc_correction_all|gc_all'		=> \$gc_correction_all,
 	'lambda=i@'			=> \$lambda,
 	'sdtze=i@'			=> \$sdtze,
 ) or pod2usage(0);

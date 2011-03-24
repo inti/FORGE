@@ -89,7 +89,7 @@ print_OUT("LOG file will be written to [ $out.log ]",$LOG);
 
 # define parameters for mnd simulation
 defined $mnd_sim_target or $mnd_sim_target = 10;
-defined $mnd_sim_max or $mnd_sim_max = 100_000;
+defined $mnd_sim_max or $mnd_sim_max = 1_000_000;
 if (defined $mnd_sim_wise_correction_methods){
 	$mnd_sim_wise_correction_methods = [ split(/\,/,$mnd_sim_wise_correction_methods) ];
 } else { $mnd_sim_wise_correction_methods = [0,1,2,3]; }
@@ -1108,7 +1108,7 @@ sub simulate_mnd {
     if ($MAX < 1000) { $MAX = 1000; }
 	my $max_step_size = 100_000;
 	my $total = 0;
-    	my $step= 1000;
+    my $step= 1000;
     if ($step > $MAX) { $step = $MAX; }
 	my ($cov,$status) = check_positive_definite($gene_data->{cor},1e-8);
 	if ($status == 1){

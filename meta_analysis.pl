@@ -12,7 +12,7 @@ our (	$help,$man, $out, $w, $in_files,
 		$stouffer,$w_col,$random,$stat_or,
 		$stat_col,$id_col, $stat_pvalue,$header, 
 		$min_studies, $gc_correction,$lambda,$sdtze,
-		$gc_correction_all
+		$gc_correction_all,$filter_col,$filter
 );
 
 
@@ -33,6 +33,8 @@ GetOptions(
 	'gc_correction_all|gc_all'		=> \$gc_correction_all,
 	'lambda=i@'			=> \$lambda,
 	'sdtze=i@'			=> \$sdtze,
+    'filter=s@'  => \$filter,
+    'filter_col=i' => \$filter_col,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -67,6 +69,13 @@ if (defined $w){
 # defined gc_correction for all studies
 if (defined $gc_correction_all){
 	$gc_correction = [ list ones scalar @$in_files ];
+}
+
+if ((defined $filter_col and not defined $filter) or (defined $filter_col and not defined $filter)) {
+    print_OUT("You must privide both a filter and columns to filter on\n");
+    exit(1);
+} else {
+    print_OUT("Applying filters [ @$filter ] to columns [ $filter_col ]");
 }
 
 open(OUT,">$out") or die $!;
@@ -108,6 +117,9 @@ foreach my $file (@$in_files) {
 		chomp($line);
 		# split line
 		my @d = split( /[\s+\t+]/, $line );
+        if (defined $filter){
+            next unless (grep $_ eq $d[ $filter_col - 1], @{$filter});
+        }
 		# set the variable weight to the var of the study
 		my $var_w = double $st_w;
 		# modify the vartiable weight if a columns with its variance is given

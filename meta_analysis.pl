@@ -71,11 +71,11 @@ if (defined $gc_correction_all){
 	$gc_correction = [ list ones scalar @$in_files ];
 }
 
-if ((defined $filter_col and not defined $filter) or (defined $filter_col and not defined $filter)) {
+if (defined $filter_col or  defined $filter){
+    print_OUT("Applying filters [ @$filter ] to columns [ $filter_col ]");
+} elsif ((defined $filter_col and not defined $filter) or (defined $filter_col and not defined $filter)) {
     print_OUT("You must privide both a filter and columns to filter on\n");
     exit(1);
-} else {
-    print_OUT("Applying filters [ @$filter ] to columns [ $filter_col ]");
 }
 
 open(OUT,">$out") or die $!;

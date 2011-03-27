@@ -103,7 +103,6 @@ if (not defined $asymp) {
 if (defined $mnd){
 	use PDL::LinearAlgebra qw (mchol);
 	use Pareto_Distr_Fit qw (Pgpd);
-    $PDL::BIGPDL = 1;
     print_OUT("Will run multivariate normal distribution simulations to estimate significance",$LOG);
 	print_OUT("   '-> max number [ $mnd_sim_max ] or until statistic is seen [ $mnd_sim_target ] times",$LOG);
 	my @m = ('sidak','fisher','z_fix','z_random');

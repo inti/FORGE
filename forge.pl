@@ -1159,11 +1159,20 @@ sub simulate_mnd {
 			push @{ $random_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_n_gene_p->{'Z_P_random'} );
 			push @{ $sidak_null_stats  }, -1 * gsl_cdf_ugaussian_Pinv( $sim_sidak );
 			push @{ $fisher_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_fisher_p_value );
-			
+            
 			my @sim_gene_ps = ( $sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'} );
 			push @{$stats_bag}, [ @sim_gene_ps[ @$compare_wise_p ] ];
 		}
 		$total += $step;
+        @{ $fisher_null_stats } = sort {$b <=> $a} @{ $fisher_null_stats };
+        @{ $random_null_stats } = sort {$b <=> $a} @{ $random_null_stats };
+        @{ $sidak_null_stats }  = sort {$b <=> $a} @{ $sidak_null_stats };
+        @{ $fisher_null_stats } = sort {$b <=> $a} @{ $fisher_null_stats };
+        @{ $fisher_null_stats } = @{ $fisher_null_stats }[0..299];
+        @{ $random_null_stats } = @{ $random_null_stats }[0..299];
+        @{ $sidak_null_stats } = @{ $sidak_null_stats }[0..299];
+        @{ $fisher_null_stats } = @{ $fisher_null_stats }[0..299];
+
 		if ($SEEN->min != 0){
 			$step = 1.1*(10*($total)/$SEEN->min);
 		} elsif ($step < $max_step_size){ 

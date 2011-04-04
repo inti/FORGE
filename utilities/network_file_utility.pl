@@ -7,7 +7,7 @@ use Data::Dumper;
 our ( $help, $man, $sif, $min_size,
     $extract,$gene_list, $max_size,
     $outfile, $reduce, %net,$max_path,
-    $overlap,
+    $overlap, $gmt
 );
 
 
@@ -23,7 +23,7 @@ GetOptions(
     'max_size=i' => \$max_size,
     'max_path' => \$max_path,
     'overlap' => \$overlap,
-    'gmt=i' => \$gmt,
+    'gmt=s' => \$gmt,
 ) or pod2usage(0);
 
 my $VERSION = "0.2";
@@ -35,7 +35,7 @@ if (not defined $outfile){
     print scalar localtime(), "\t",  "Please define the output file\n";
     pod2usage(0); 
 }
-if (not defined $sif){
+if (not defined $sif and not defined $gmt){
     print scalar localtime(), "\t", "Please define the network file (in SIF format)\n";
     pod2usage(0); 
 }
@@ -105,44 +105,63 @@ if (defined $extract) {
 }
 
 if (defined $overlap){
+    my $total = 0;
+    my $idx = 0;
     my %genes = ();
     my @pathways = ();
-    my @p_genes = ();
+    my @nr_genes = ();
+    my %all_gmt = ();
+    print scalar localtime(), "\t", "Reading gene-set definitions from [ $gmt ]\n";
     open( GMT, $gmt ) or print "Cannot open [ $gmt ]" and die $!;
 	while ( my $path = <GMT> ) {
-		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
+        chomp($path);
+		my ( $p_name, $p_desc, @p_genes ) = split( /\t+/, $path );
 		foreach my $gn ( @p_genes ) {
 			$gn = lc($gn);
-			if ( $gn =~ m/\// ) {
+            if ( $gn =~ m/\// ) {
 				$gn =~ s/\s+//g;
-				my @genes = split( /\/{1,}/, $gn );
-				map {
-					$total++;
-					push @p_genes, $_;
-                    $genes{ $_ } = $p_name;
-				} @genes;
+				my @syn_genes = split( /\/{1,}/, $gn );
+				foreach my $syn (@syn_genes) {
+					push @nr_genes, $syn;
+                    push @{ $genes{ $gn } }, $p_name;
+				}
 			} else {
-				$total++;
-				push push @p_genes, $_;
-                $genes{ $_ } = $p_name;
+				push  @nr_genes, $gn;
+                push @{ $genes{ $gn } }, $p_name;
 			}
 		}
 		my $p = { 'name' => $p_name,
             'desc' => $p_desc ,
             'N_all' => $total,
-            'genes' => \@p_genes,
+            'genes' => \@nr_genes,
         };
-		
-		# this section reduces the gene sets to sets of genes of non-overlapping recombination intervals
-		# it first check in which recombination intervals the genes are
-		# then it will keep those that do not share recomb inter with other genes.
-		# the cases where more than one gene belong to the same recombination interval
-		# are solve by choosing the best p-value per recombination interval.
+        $total = 0;
 		push @pathways, $p;
+        $all_gmt{$p->{name}} = $idx++;
 	}
 	close(GMT);
+    use PDL;
+    use PDL::Matrix;
+    use PDL::NiceSlice;
+    my $mat = zeroes scalar keys %all_gmt, scalar keys %genes;
+    my $g_idx = 0;
+    foreach my $gn ( sort {$a cmp $b } keys %genes) {
+        foreach my $club ( @{$genes{$gn}}){
+            set $mat, $all_gmt{$club},$g_idx, 1;
+        }
+        $g_idx++;
+    }
     
-
+    open (OUT,">$outfile") or die $!;
+    
+    print OUT "gene ", join " ", sort { $all_gmt{$a} <=> $all_gmt{$b} } keys %all_gmt;
+    print OUT "\n";
+    $g_idx = 0;
+    foreach my $gn (sort {$a cmp $b } keys %genes) {
+        print OUT "$gn ", join " ",$mat->(,$g_idx)->list;
+        print OUT "\n";
+        $g_idx++;
+    }
 }
 print scalar localtime(), "\t", "Done!!\n";
 
@@ -229,6 +248,10 @@ script [options]
         -min_size               min size for the gene-set extracted  
         -max_size               max size for the gene-set extracted
         -max_path               max path length from the seed node to define a gene-set
+ 
+        Overlap mode
+        -overlap        print out an gene/gene-set membership matrix
+        -gmt            input file with gene-sets for which you which to calculate the overlap
 
 =head1 OPTIONS
 
@@ -274,6 +297,14 @@ Max size for the gene-set extracted
 
 Max path length from the seed node to define a gene-set
 
+=item B<-overlap>
+
+print out an gene/gene-set membership matrix
+
+=item B<-gmt>
+
+input file with gene-sets for which you which to calculate the overlap
+ 
 =back
 
 =head1 DESCRIPTION

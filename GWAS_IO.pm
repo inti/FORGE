@@ -26,11 +26,58 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
-@EXPORT_OK = qw( extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
+@EXPORT = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
+@EXPORT_OK = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
 
 
 
+sub read_gmt {
+    my $file = shift;
+	open( GMT, $file ) or print_OUT("Cannot open [ $file ]") and die $!;
+    my %back = ();
+	while ( my $path = <GMT> ) {
+		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
+        next if (exists $back{ $p_name });
+        $back{ $p_name } = { 
+            'name' => $p_name,
+            'desc' => $p_desc ,
+            'stats' => [],
+            'N_all' => undef,
+            'N_in' => undef,
+            'genes' => [],
+            'gene_recomb_inter_redundant' => [],
+            'intervals' => undef,
+            'node_weigths' => null,
+            'z_stat_raw' => undef,
+            'z_stat_empi' => undef,
+            'snps' => undef,
+        };
+		my $total = 0;
+        my %tmp = ();
+		foreach my $gn (@p_genes) {
+			$gn = lc($gn);
+			if ( $gn =~ m/\// ) {
+				$gn =~ s/\s+//g;
+				my @genes = split( /\/{1,}/, $gn );
+				map {
+					$total++;
+                    $tmp{ $_ } = "";
+				} @genes;
+			} else {
+				$total++;
+				$tmp{ $gn } = "";
+			}
+		}
+        @{ $back{ $p_name }->{genes} } = keys %tmp;
+
+        $back{ $p_name }->{total} = $total;
+        $back{ $p_name }->{N_all} = $total;
+        $back{ $p_name }->{N_in} = $total;
+	}
+    
+	close( GMT );
+    return( \ %back );
+}
 
 # extract stats from plink *.mperm.dump.all files
 sub extract_stats_from_mperm_dump_all_files {

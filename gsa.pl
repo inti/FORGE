@@ -11,6 +11,9 @@ use PDL::Ufunc;
 use PDL::LinearAlgebra qw(mchol);
 use Data::Dumper;
 use IO::File;
+use Carp qw( confess );
+$SIG{__DIE__} =  \&confess;
+$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;
@@ -26,7 +29,8 @@ our (	$help, $man, $gmt, $pval,
 	$gs_coverage,$snp_assoc, $bfile,
 	$snpmap, $distance, $affy_to_rsid,$gene_set_list,
 	$quick_gene_cor,$gene_cor_max_dist,$print_ref_list,
-	$mnd,$mnd_N,$gene_p_type,$gc_correction, $mnd_gene_corr
+	$mnd,$mnd_N,$gene_p_type,$gc_correction, $mnd_gene_corr,
+    $binomial, $query_sets,$min_overlap_size
 );
 
 GetOptions(
@@ -63,13 +67,17 @@ GetOptions(
 	'mnd_n=i' => \$mnd_N,
 	'gene_p_type' => \$gene_p_type,
     'gc_correction' => \$gc_correction,
+    'binomial' => \$binomial,
+    'query_sets=s@' => \$query_sets,
+    'min_overlap_size=i' => \$min_overlap_size,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
 pod2usage(-exitstatus => 2, -verbose => 2) if (defined $man);
-pod2usage(0) if (not defined $pval);
+pod2usage(0) if (not defined $pval and not defined $query_sets);
 pod2usage(0) if (not defined $out);
 pod2usage(0) if (not defined $gmt);
+
 
 my $LOG = new IO::File; 
 $LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$LOG) and exit(1);
@@ -104,6 +112,12 @@ if (defined $mnd){
 	} else { $gene_p_type = 'z_fix'; }
 	print_OUT("Will use multivariate normal distribution sampling to estimate gene-gene correlations. Using [ $mnd_N ] simulations with the [ $gene_p_type] gene p-value");
 }	
+
+if (defined $binomial){
+    if (not defined $ref_list){ $all_are_background = 1; }
+    defined $min_overlap_size  or $min_overlap_size = 1;
+}
+
 print_OUT("Will analyses Gene-set between [ $min_size ] and [ $max_size ] in size",$LOG);
 
 defined $set_stat or $set_stat = 'mean';
@@ -120,54 +134,55 @@ if (defined $ref_list){
 }
 
 my %gene_data = ();
-print_OUT("Reading gene stats [ $pval ]",$LOG);
-open( PVAL, $pval ) or die $!;
-while (my $line = <PVAL>) {
-	chomp($line);
-	my ( $gn, $p ) = split( /[\t+\s+]/, $line );
-	$gn = lc($gn);
-	if (defined $ref_list){
-		next if (not exists $ref_genes{$gn});
-	}
-	next if ( $p eq "NA" );
-	unless (defined  $input_z){
-		next if ( $p !~ m/\d/);
-		if ( $p == 0 ) {
-			print_OUT("WARNING: This gene [ " . uc($gn) . " ] has p-value equal [ $p ], I do not know how to transformit to Z score",$LOG);
-			next;
-		}
-	}
-	my $z = 0;
-	if (defined $input_z){
-		$z = abs($p);
-	} else {
-		if ($p == 1){ $p = 0.99999999; }
-		$z = -1 * gsl_cdf_ugaussian_Pinv($p);
-	}
-	$z = eval($z);
-	if ( exists $gene_data{$gn} ) {
-		if ( $gene_data{$gn}->{stat} > $z ) { 
-			$gene_data{$gn}->{stat} = $z; 
-			$gene_data{$gn}->{pvalue} = $p;
-		}
-		
-	} else { 
-		$gene_data{$gn} = {
-					'stat' => $z,
-					'pvalue'=> $p,
-					'recomb_int' => [],
-					'node_similarity'=> null,
-					'genotypes' => null,
-					'snps' => undef,
-					'chr' => undef,
-					'start' => undef,
-					'end' => undef,
-		};
-	}
+if (defined $pval){
+    print_OUT("Reading gene stats [ $pval ]",$LOG);
+    open( PVAL, $pval ) or die $!;
+    while (my $line = <PVAL>) {
+        chomp($line);
+        my ( $gn, $p ) = split( /[\t+\s+]/, $line );
+        $gn = lc($gn);
+        if (defined $ref_list){
+            next if (not exists $ref_genes{$gn});
+        }
+        next if ( $p eq "NA" );
+        unless (defined  $input_z){
+            next if ( $p !~ m/\d/);
+            if ( $p == 0 ) {
+                print_OUT("WARNING: This gene [ " . uc($gn) . " ] has p-value equal [ $p ], I do not know how to transformit to Z score",$LOG);
+                next;
+            }
+        }
+        my $z = 0;
+        if (defined $input_z){
+            $z = abs($p);
+        } else {
+            if ($p == 1){ $p = 0.99999999; }
+            $z = -1 * gsl_cdf_ugaussian_Pinv($p);
+        }
+        $z = eval($z);
+        if ( exists $gene_data{$gn} ) {
+            if ( $gene_data{$gn}->{stat} > $z ) { 
+                $gene_data{$gn}->{stat} = $z; 
+                $gene_data{$gn}->{pvalue} = $p;
+            }
+            
+        } else { 
+            $gene_data{$gn} = {
+                        'stat' => $z,
+                        'pvalue'=> $p,
+                        'recomb_int' => [],
+                        'node_similarity'=> null,
+                        'genotypes' => null,
+                        'snps' => undef,
+                        'chr' => undef,
+                        'start' => undef,
+                        'end' => undef,
+            };
+        }
+    }
+    close(PVAL);
+    print_OUT("   '-> [ " . scalar (keys %gene_data) . " ] genes will be analysed",$LOG);
 }
-close(PVAL);
-print_OUT("   '-> [ " . scalar (keys %gene_data) . " ] genes will be analysed",$LOG);
-
 if (defined $gene_sets){
 	print_OUT("Reading Gene-sets from command line [ " . @{$gene_sets} . " ]",$LOG);
 }
@@ -188,69 +203,43 @@ my %genes_in_paths = ();
 my %gene_2_paths_map = ();
 # store all pathways and it information 
 my @pathways        = ();
+my %PATHS = ();
 foreach my $gene_set_file (@$gmt){
 	print_OUT("Reading gene-set definitions from [ $gene_set_file ]",$LOG);
-	open( GMT, $gene_set_file ) or print_OUT("Cannot open [ $gene_set_file ]") and die $!;
-	while ( my $path = <GMT> ) {
-		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
-		if (defined $gene_sets){
-			next unless (grep $_ eq $p_name,@$gene_sets); 
-		}
-		my @p_stats = ();
-		my @gene_with_p = ();
-		my $total = 0;
-		foreach my $gn (@p_genes) {
-			$gn = lc($gn);
-			if ( $gn =~ m/\// ) {
-				$gn =~ s/\s+//g;
-				my @genes = split( /\/{1,}/, $gn );
-				map {
-					$total++;
-					next if ( not exists $gene_data{$_} );
-					push @p_stats, $gene_data{$_}->{stat};
-					push @gene_with_p, $_;
-				} @genes;
-			} else {
-				$total++;
-				next if ( not exists $gene_data{$gn} );
-				push @p_stats, $gene_data{$gn}->{stat};
-				push @gene_with_p, $gn;
-			}
-		}
-		next if ( scalar @p_stats < $min_size );
-		next if ( scalar @p_stats > $max_size );
-		next if ( $gs_coverage > (scalar @p_stats)/$total);
-		my $p = { 'name' => $p_name,
-				'desc' => $p_desc ,
-				'stats' => [],
-				'N_all' => $total,
-				'N_in' => undef,
-				'genes' => \@gene_with_p,
-				'gene_recomb_inter_redundant' => [],
-				'intervals' => undef,
-				'node_weigths' => null,
-				'z_stat_raw' => undef,
-				'z_stat_empi' => undef,
-				'snps' => undef,
-				};
-		
-		# this section reduces the gene sets to sets of genes of non-overlapping recombination intervals
-		# it first check in which recombination intervals the genes are
-		# then it will keep those that do not share recomb inter with other genes.
-		# the cases where more than one gene belong to the same recombination interval
-		# are solve by choosing the best p-value per recombination interval.
-		$p->{N_in} = scalar @{$p->{'genes'}} if (not defined $p->{N_in});
-		if (scalar @{ $p->{'stats'} } == 0){  
-			@{ $p->{'stats'} } = map { $gene_data{$_}->{stat} } @{$p->{'genes'}};  
-		}
-		map { 
-			$genes_in_paths{$_} = $gene_data{$_}->{stat}; 
-			push @{ $gene_2_paths_map{$_} }, $p->{name};
-		} @{ $p->{genes} };
-		map { $genes_in_paths{$_} = $gene_data{$_}->{stat}; } @{ $p->{"gene_recomb_inter_redundant"} };
-		push @pathways, $p;
-	}
-	close(GMT);
+    my %new_pathways = %{ read_gmt($gene_set_file) };
+    @PATHS{keys %new_pathways} = values %new_pathways;
+}
+# store gene data into the pathway information
+foreach my $set (keys %PATHS) {
+    my $p = $PATHS{$set};
+    my @new_genes = ();
+    my @p_stats = ();
+    # discard pathways if it is too small
+    if (scalar @{$p->{genes}} < $min_size){
+        delete($PATHS{$set});
+    }
+    foreach my $gn (@{$p->{genes}}){
+        if (defined $binomial and defined $ref_list){
+            push @new_genes, $gn if (exists $ref_genes{$gn});
+        } elsif (defined $binomial){
+            push @new_genes, $gn;
+        } else {
+            next if ( not exists $gene_data{ $gn } );
+            push @p_stats, $gene_data{$gn}->{stat};
+            push @new_genes, $gn;
+        }
+    }
+    @{$p->{'genes'}} = @new_genes;
+    $p->{'N_in'} = scalar @{$p->{'genes'}};
+    if (not defined $binomial){
+        @{ $p->{'stats'} } = map { $gene_data{$_}->{stat} } @{$p->{'genes'}};
+    }
+    map { $genes_in_paths{$_} = $gene_data{$_}->{stat}; } @{ $p->{'genes'} };
+    # discard pathways if it is too small or too large
+    if (scalar @new_genes < $min_size or scalar @new_genes > $max_size){
+        delete($PATHS{$set});
+    }
+    $PATHS{ $set } = $p;
 }
 
 if (defined $ref_list){
@@ -268,10 +257,95 @@ if (scalar @pathways == 1){
 		}
 	}
 }
+@pathways = values %PATHS;
+print_OUT("   '-> [ " . scalar (keys %PATHS) . " ] gene-sets will be analysed",$LOG);
 
-print_OUT("   '-> [ " . scalar @pathways . " ] gene-sets will be analysed",$LOG);
+my %QGS = ();
+if (defined $query_sets){
+    foreach my $f_qs ( @{ $query_sets } ) {
+        print_OUT("Reading gene-set definitions from query file [ $f_qs ]",$LOG);
+        my %new_pathways = %{ read_gmt($f_qs) };
+        @QGS{keys %new_pathways} = values %new_pathways;
+    }
+    # store gene data into the pathway information
+    foreach my $set (keys %QGS) {
+        my $p = $QGS{ $set };
+        my @new_genes = ();
+        my @p_stats = ();
+        # discard pathways if it is too small
+        if (scalar @{$p->{genes}} < $min_size){
+            delete($QGS{ $set });        
+        }
+        foreach my $gn (@{$p->{genes}}){
+            if (defined $binomial and defined $ref_list){
+                push @new_genes, $gn if (exists $ref_genes{$gn});
+            } elsif (defined $binomial){
+                push @new_genes, $gn;
+            } 
+        }
+        @{$p->{'genes'}} = @new_genes;
+        $p->{'N_in'} = scalar @{$p->{'genes'}};
+        map { $genes_in_paths{$_} = $gene_data{$_}->{stat}; } @{ $p->{'genes'} };
+        # discard pathways if it is too small or too large
+        if (scalar @new_genes < $min_size or scalar @new_genes > $max_size){
+            delete($QGS{ $set });        
+        }
+        $QGS{ $set } = $p;
+    }
+    print_OUT("   '-> [ " . scalar (keys %QGS) . " ] query gene-sets will be analysed",$LOG);
+}
 
-
+# if option binomial was given this is all input data needed
+if (defined $binomial){
+    print_OUT("Writing output to [ $out ]",$LOG);
+    if (defined $append){
+        open (OUT,">>$out") or die $!;
+    } else {
+        open (OUT,">$out") or die $!;
+        print OUT "QUERY_NAME\tQUERY_DESC\tTARGET_NAME\tTARGET_DESC\tOVERLAP\tQUERY_TOTAL\tTARGET_TOTAL\tTOTAL_REF\tP_BINOMIAL\tOVERLAP_GENES\n";    
+    }
+    my $total_ref= scalar (keys %ref_genes);
+    my %g2p = ();
+    while ( my ($p_name,$p) = each %PATHS ) {
+        foreach my $gn (@ {$p->{'genes'} }){ 
+            push @{ $g2p{$gn} }, $p_name;
+        }
+    }
+    while ( my ($q_name,$q) = each %QGS ) {
+        my %overlap = ();
+        foreach my $gn ( @{ $q->{'genes'} }){
+            
+            foreach my $p ( @{ $g2p{ $gn } } ){
+                $overlap{ $p }->{N}++;
+                push @{ $overlap{ $p }->{genes} }, $gn;
+            }
+        }
+        
+        foreach my $p_name (keys %overlap){
+            next if ($PATHS{ $p_name }{'N_in'} == 1);
+            next if ($overlap{$p_name}->{N} < $min_overlap_size);
+            @{ $overlap{ $p_name }->{genes} } = sort { $a cmp $b } @{ $overlap{ $p_name }->{genes} };
+            my $prob = $PATHS{ $p_name }{'N_in'}/$total_ref;
+            my $k = $overlap{$p_name}->{N};
+            my $n = $q->{N_in};
+            my $p_binom = double 1 - gsl_cdf_binomial_P($k,$prob,$n);
+            print OUT join "\t",($q->{'name'},
+                            $q->{'desc'},
+                            $p_name,
+                            $PATHS{ $p_name }{'desc'},
+                            $overlap{$p_name}->{N},
+                            $q->{N_in},
+                            $PATHS{ $p_name }{'N_in'},
+                            $total_ref,
+                            $p_binom,
+                            "@{ $overlap{ $p_name }->{genes} }\n");
+        }
+        %overlap = ();
+    }
+    close(OUT);
+    print_OUT("Well Done baby",$LOG);
+    exit(0);
+}
 
 # Now lets going to read the affy id to rsid mapping. This is used to keep all ids in the
 # same nomenclature
@@ -807,6 +881,7 @@ sub check_overlap {
 	# else there is no overlap
 	return($back);
 }
+
 
 
 sub calculate_gene_corr_mat {

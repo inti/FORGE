@@ -28,7 +28,8 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
-	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump,$asymp
+	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump,$asymp,
+    $low_mem,
 );
 
 GetOptions(
@@ -74,6 +75,7 @@ GetOptions(
 	'mnd_methods=s' => \$mnd_sim_wise_correction_methods,
 	'stats_dump=s' => \$mperm_dump,
     'asymp|asymptotic' => \$asymp,
+    'low_mem' => \$low_mem,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -867,11 +869,23 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     } else {
         print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness",$LOG);
     }
+    if (defined $low_mem){
+        use PDL::Compression;
+        $gene{$gn}->{genotypes} = 1_000*$gene{$gn}->{genotypes};
+        my $c = "";
+        ( $gene{$gn}->{genotypes}, $gene{$gn}->{asize}) =  $gene{$gn}->{genotypes}->short->rice_compress();
+    }
     
-        
-        
-    # CALCULATE CORRELATIONS AND WEIGHTS 
+}
 
+%snp_genotype_stack = ();
+
+foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gene){
+        
+    if (defined $low_mem){
+        $gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->rice_expand($gene{$gn}->{asize});
+        $gene{$gn}->{genotypes} /= 1000;
+    }
     # Calculate the genotypes correlation matrix
     my $more_corrs = "";
     ($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);

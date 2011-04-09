@@ -97,6 +97,7 @@ sub extract_stats_from_mperm_dump_all_files {
 		push @{$data},$z;
 		$c++;
 	}
+    close(DUMP);
 	$data = pdl $data;
 	return($data);
 }
@@ -158,6 +159,7 @@ sub read_fam {
 			'pheno' => $data[5],
         };
 	}
+    close(FAM);
 	#print_OUT("[ " . scalar @back . " ] samples read");
 	return ( \@back );
 }
@@ -190,6 +192,7 @@ sub read_bim {
 			'a1'     => $data[5],
         };
 	}
+    close(BIM);
 	#print_OUT("[ " .  scalar @back . " ] SNPs on BED file");
 	return ( \@back );
 }
@@ -220,6 +223,7 @@ sub read_map {
 			'a1'     => 0,
         };
 	}
+    close(MAP);
 	#print_OUT("  '->[ " . scalar @back . " ] SNPs on PED file");
 	return ( \@back );
 }
@@ -254,6 +258,7 @@ sub read_map_and_ped {
 			'pheno' => $pheno,
 		};
 	}
+    close(PED);
 	my @back_genotypes = ();
 	my $snp_counter = 0;
 	foreach my $snp (@geno_matrix){

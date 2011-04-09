@@ -167,7 +167,7 @@ if (defined $geno_probs){
     } else {
         print_OUT("   '-> Found [ $geno_probs.idx ] file for genotype probabilities",$LOG);
         $gprobs_index->open("<$geno_probs.idx") or print_OUT("Can't open $index_name for read/write: $!\n",$LOG) and exit(1);
-	binmode($gprobs_index);
+        binmode($gprobs_index);
     }
 } 
 
@@ -875,9 +875,15 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
         my $c = "";
         ( $gene{$gn}->{genotypes}, $gene{$gn}->{asize}) =  $gene{$gn}->{genotypes}->short->rice_compress();
     }
-    
+    $count++;
+    &report_advance($count,$report,"  '-> Gene genotypes read");	
 }
-
+if (defined $bfile) {
+    $bed->close();
+} elsif (defined $geno_probs){
+    $gprobs->close();
+}
+$count = 0;
 %snp_genotype_stack = ();
 
 foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gene){
@@ -894,10 +900,11 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     # Calculate the weights for the gene
     $gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
     
-    # Calculate average max genotype prob and use it as weitghs
-    $gene{$gn}->{weights} *= daverage $gene{$gn}->{genotypes};
-    $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
-    
+    if (defined $geno_probs) {
+        # Calculate average max genotype prob and use it as weitghs
+        $gene{$gn}->{weights} *= daverage $gene{$gn}->{genotypes};
+        $gene{$gn}->{weights} /= $gene{$gn}->{weights}->sumover;
+    }
     
     # CALCULATE GENE P-VALUES
     my $z_based_p = z_based_gene_pvalues($gene{$gn},$mnd);

@@ -40,7 +40,7 @@ sub rmnorm {
 	my $chol = shift;
 	my @back = ();
 	my $d = $c->getdim(0);
-	my $vector =$PDL::BIGPDL=mpdl grandom $d,$n;
+	my $vector = mpdl grandom $d,$n;
 	if (not defined $chol) { $chol = mchol($c); }
 	my $z = $vector x $chol->transpose;
 	my $y = transpose( $mean + transpose($z));

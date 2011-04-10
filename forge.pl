@@ -186,7 +186,7 @@ if (not defined $mnd){
 	print $OUT "Ensembl_ID\tHugo_id\tgene_type\tchromosome\tstart\tend";
 	print $OUT "\tmin_p\tSIM_SIDAK\tSIM_FISHER\tSIM_Z_FIX\tSIM_Z_RANDOM";
 	print $OUT "\tI-squared\tQ\tQ_p-value\ttau_squared";
-	print $OUT "\tSIM_BEST_P\tSIM_BEST_method\tN_SIM";
+	print $OUT "\tN_SIM";
 	print $OUT "\tSEEN_SIDAK\tSEEN_FISHER\tSEEN_Z_FIX\tSEEN_RANDOM";
 	print $OUT "\tGPD_SIDAK\tGPD_SIDAK_LOW\tGPD_SIDAK_UP";
 	print $OUT "\tGPD_FISHER\tGPD_FISHER_LOW\tGPD_FISHER_UP";
@@ -883,6 +883,9 @@ if (defined $bfile) {
 } elsif (defined $geno_probs){
     $gprobs->close();
 }
+
+
+print_OUT("Starting to calculate gene p-values",$LOG);
 $count = 0;
 %snp_genotype_stack = ();
 
@@ -891,6 +894,7 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     if (defined $low_mem){
         $gene{$gn}->{genotypes} = $gene{$gn}->{genotypes}->rice_expand($gene{$gn}->{asize});
         $gene{$gn}->{genotypes} /= 1000;
+        $gene{$gn}->{genotypes} = float $gene{$gn}->{genotypes};
     }
     # Calculate the genotypes correlation matrix
     my $more_corrs = "";
@@ -997,10 +1001,8 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
         $z_based_p->{'Q'},
         $z_based_p->{'Q_P'},
         $z_based_p->{'tau_squared'},
-        $simulated_p->{wise_p},
-        $simulated_p->{wise_method},
         $simulated_p->{N},
-        
+
         $simulated_p->{'seen_sidak'},# number of times stats was seen
         $simulated_p->{'seen_fisher'},
         $simulated_p->{'seen_fix'},
@@ -1028,17 +1030,18 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
         print $OUT "\n";
     }
 		
-    # remove LD measures and genotypes from the stack that will not use again to free memory
-    foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
-        if (scalar @{ $snp_to_gene{ $snp } } == 1){
-            foreach my $pair ( keys %{$correlation{$snp}}){
-                delete($correlation{$snp}{$pair});
-                delete($correlation{$pair}{$snp});
+    if (defined $use_ld_as_corr) {
+        # remove LD measures and genotypes from the stack that will not use again to free memory
+        foreach my $snp (  @{ $gene{$gn}->{geno_mat_rows} } ){
+            if (scalar @{ $snp_to_gene{ $snp } } == 1){
+                foreach my $pair ( keys %{$correlation{$snp}}){
+                    delete($correlation{$snp}{$pair});
+                    delete($correlation{$pair}{$snp});
+                }
+                delete($snp_to_gene{ $snp });
+            } else {
+                splice(@{ $snp_to_gene{ $snp } },0,1);
             }
-            delete($snp_genotype_stack{ $snp });
-            delete($snp_to_gene{ $snp });
-        } else {
-            splice(@{ $snp_to_gene{ $snp } },0,1);
         }
     }
     # delete the gene's data to keep memory usage low
@@ -1162,8 +1165,8 @@ sub simulate_mnd {
 		$vegas_count += dsum( $sim_chi_df1->xchg(0,1)->dsumover >= $vegas_stat);
 		push @{ $vegas_null_stats }, $sim_chi_df1->xchg(0,1)->dsumover->list;
 		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
-		$sim_chi_df1 = '';
-		$sim = '';
+		undef $sim_chi_df1;
+		undef $sim;
 		for (my $sim_n = 0; $sim_n < $sim_p->getdim(0); $sim_n++){
 			$fake_gene->{'pvalues'} = $sim_p->($sim_n,)->flat;
 			my $sim_n_gene_p = z_based_gene_pvalues($fake_gene,$mnd);
@@ -1181,8 +1184,6 @@ sub simulate_mnd {
 			push @{ $sidak_null_stats  }, -1 * gsl_cdf_ugaussian_Pinv( $sim_sidak );
 			push @{ $fisher_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_fisher_p_value );
             
-			my @sim_gene_ps = ( $sim_sidak,$sim_fisher_p_value,$sim_n_gene_p->{'Z_P_fix'},$sim_n_gene_p->{'Z_P_random'} );
-			push @{$stats_bag}, [ @sim_gene_ps[ @$compare_wise_p ] ];
 		}
 		$total += $step;
         @{ $fisher_null_stats } = sort {$b <=> $a} @{ $fisher_null_stats };
@@ -1229,6 +1230,12 @@ sub simulate_mnd {
 	my ($pareto_fisher_Phat,$pareto_fisher_Phatci_low,	$pareto_fisher_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $fisher_observed,	$fisher_null_stats,	250,0.05);
 	my ($pareto_vegas_Phat,	$pareto_vegas_Phatci_low,	$pareto_vegas_Phatci_up)	= Pareto_Distr_Fit::Pgpd( $vegas_stat,		$vegas_null_stats,	250,0.05);
 	
+    undef $fix_null_stats;
+	undef $random_null_stats;
+	undef $sidak_null_stats;
+	undef $fisher_null_stats;
+	undef $vegas_null_stats;
+    
 	$back->{'seen_vegas'}	= $vegas_count;
 	$back->{'seen_sidak'}	= sclr $SEEN->(0);
 	$back->{'seen_fisher'}	= sclr $SEEN->(1);
@@ -1260,18 +1267,6 @@ sub simulate_mnd {
 	$back->{'pareto_vegas_Phatci_low'} =  $pareto_vegas_Phatci_low;
 	$back->{'pareto_vegas_Phatci_up'}	=  $pareto_vegas_Phatci_up;
 	
-	my @methods = ('sidak','fisher','z_fix','z_random');
-	@methods = @methods[@$compare_wise_p];
-	my $methods_p = pdl ($back->{sidak},$back->{fisher},$back->{z_fix},$back->{z_random});
-	$stats_bag = pdl $stats_bag;
-	$stats_bag = gsl_cdf_ugaussian_Pinv($stats_bag);
-	my $stat_cor = cov_shrink($stats_bag);
-	my ($stats_Meff_gao,$stats_Meff_galwey) = number_effective_tests(\$stat_cor->{cor});
-
-	my $min = $methods_p->minimum_ind();
-	$back->{'wise_p'} = sclr 1 - ( 1 - $methods_p->( $min ) )**$stats_Meff_gao;
-	$back->{'wise_method'} = $methods[$min];
-	$back->{'stats_gao'} = $stats_Meff_gao;
 	return( $back );
 }
 

@@ -17,7 +17,8 @@ eval {
 	use PDL::GSL::CDF;
 	use IO::File;
 	use IO::Seekable;
-	use Fcntl;
+    use Fcntl qw(:flock SEEK_END);
+
 };
 if ($@) { 
 	print "Some libraries does not seem to be in you system. quitting\n";
@@ -26,10 +27,19 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
-@EXPORT_OK = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
+@EXPORT = qw( lock unlock read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
+@EXPORT_OK = qw( lock unlock read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
 
-
+sub lock {
+    my ($fh) = @_;
+    flock($fh, LOCK_EX) or die "Cannot lock file - $!\n";
+    # and, in case someone appended while we were waiting...
+    seek($fh, 0, SEEK_END) or die "Cannot seek into file - $!\n";
+}
+sub unlock {
+    my ($fh) = @_;
+    flock($fh, LOCK_UN) or die "Cannot unlock file - $!\n";
+}
 
 sub read_gmt {
     my $file = shift;

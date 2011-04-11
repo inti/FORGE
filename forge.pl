@@ -1130,7 +1130,7 @@ sub simulate_mnd {
     my $g_pareto_dist = shift; # 0,1 to do GPD approximation
     
     if ($MAX < 1000) { $MAX = 1000; }
-	my $max_step_size = 100_000;
+	my $max_step_size = 10_000;
 	my $total = 0;
     my $step= 1000;
     if ($step > $MAX) { $step = $MAX; }
@@ -1199,14 +1199,17 @@ sub simulate_mnd {
             @{ $sidak_null_stats } = @{ $sidak_null_stats }[0..299];
             @{ $fisher_null_stats } = @{ $fisher_null_stats }[0..299];
         }
+=head Commented to run fix number of simulation on each loop
 
-		if ($SEEN->min != 0){
-			$step = 1.1*(10*($total)/$SEEN->min);
+        if ($SEEN->min != 0){
+			#$step = 1.1*(10*($total)/$SEEN->min);
 		} elsif ($step < $max_step_size){ 
-			$step *=10; 
+			#$step *=10; 
+            $step +=1000; 
 		}
 		if ($step > $MAX){ $step = $MAX; }
-
+ 
+=cut
 		last if ($total > $MAX);
 	}
 	my $back = {

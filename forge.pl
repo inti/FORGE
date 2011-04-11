@@ -10,9 +10,9 @@ use PDL::NiceSlice;
 use PDL::Stats::Basic;
 use PDL::Bad;
 use Data::Dumper;
-use Carp qw( confess );
-$SIG{__DIE__} =  \&confess;
-$SIG{__WARN__} = \&confess;
+#use Carp qw( confess );
+#$SIG{__DIE__} =  \&confess;
+#$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;
@@ -171,6 +171,15 @@ if (defined $geno_probs){
         binmode($gprobs_index);
     }
 } 
+
+if (defined $low_mem){
+    eval { require PDL::Compression; };
+    if ($@ ne ""){
+        print_OUT("You specified -low_mem option. This required the PDL::Compression and seems you do not have it. Check you PDL package, update may be needed.\n",$LOG);
+        exit(1);
+    }
+
+}
 
 # print header for output file
 my $OUT = new IO::File; 
@@ -873,7 +882,6 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
         print_OUT("WARNING: Gene p-values will be calculated with the precomputed correlation only. If correlation for some SNPs pairs are missing you may get wrong results, please check your inputs for completeness",$LOG);
     }
     if (defined $low_mem){
-        use PDL::Compression;
         $gene{$gn}->{genotypes} = 1_000*$gene{$gn}->{genotypes};
         ( $gene{$gn}->{genotypes}, $gene{$gn}->{asize}) =  $gene{$gn}->{genotypes}->short->rice_compress();
     }
@@ -1199,7 +1207,8 @@ sub simulate_mnd {
             @{ $sidak_null_stats } = @{ $sidak_null_stats }[0..299];
             @{ $fisher_null_stats } = @{ $fisher_null_stats }[0..299];
         }
-=head Commented to run fix number of simulation on each loop
+=head 
+        #Commented to run fix number of simulation on each loop
 
         if ($SEEN->min != 0){
 			#$step = 1.1*(10*($total)/$SEEN->min);

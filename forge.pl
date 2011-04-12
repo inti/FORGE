@@ -449,7 +449,6 @@ my %gene = ();
 my $gene_counter = 0;
 my %snp_to_gene = ();
 my %ids_map = ();
-
 if (defined $mpi){
     print_OUT("Will read SNP-2-gene mapping files in parallele",$LOG,$rank);
     
@@ -580,42 +579,18 @@ if (defined $mpi){
         for (my $child = 0; $child < $n_cpu; $child++){
             next if ($child == 0);
             my $remote_data = MPI_Recv($child, 12, $global_comm);
-            foreach my $k (keys %{$remote_data}){
-                $gene{$k} =  $remote_data->{$k};
-            }
+            %gene = (%gene,%{$remote_data});
         }
     }
     if ($rank == 0){
-        print_OUT("   '-> Spliting [ " . scalar (keys %gene) . " ] genes into [ $n_cpu ] batches",$LOG,$rank);
-        my @names = sort {$a cmp $b} keys %gene;
-        my $array = split_array([@names],$n_cpu);
-        for ( my $child = 0; $child < $n_cpu; $child++ ){
-            next if ($child == 0);
- 
-            my @child_names = @{$array->[$child]};
-            my %tmp = ();
-            @tmp{ @child_names } = @gene{ @child_names };
-            if (scalar (keys %tmp) == 0){
-                MPI_Send(\{},$child, 45, $global_comm);
-            } else {
-                MPI_Send(\%tmp,$child, 45, $global_comm);                
-            }
-        }
-        
-        my @child_names = @{$array->[$rank]};
-        my %tmp = ();
-        @tmp{ @child_names } = @gene{ @child_names };
-        %gene = %tmp;
+        MPI_Bcast( \%gene, 0, MPI_COMM_WORLD);
         MPI_Barrier($global_comm);
-
     } else {
-        my $remote_data = MPI_Recv(0,45, $global_comm);
-        %gene = %{$remote_data};
-        
+        my $remote_data = MPI_Bcast(undef, 0, MPI_COMM_WORLD);
+        %gene = %{$remote_data};        
         MPI_Barrier($global_comm);
     }
 }
-
 print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes read from SNP-2-Gene Mapping files",$LOG,$rank);
 print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed",$LOG,$rank);
 
@@ -1092,7 +1067,7 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
         };
         
         if ($z_based_p->{'Z_P_fix'} =~ m/[\d+]/){
-            $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$g_pareto_dist,$n_cpus); 
+            $simulated_p = simulate_mnd($mnd_sim_target,$mnd_sim_max,$pvalue_based_p->{sidak_min_p},$pvalue_based_p->{Meff_gao},$pvalue_based_p->{fisher},$z_based_p->{'Z_P_fix'},$z_based_p->{'Z_P_random'},$gene{$gn},$g_pareto_dist,$n_cpu); 
         }
         
         push @OUT_LINES, join "\t",($gene{$gn}->{ensembl},$gene{$gn}->{hugo},$gene{$gn}->{gene_type},$gene{$gn}->{chr},$gene{$gn}->{start},$gene{$gn}->{end},
@@ -1151,12 +1126,14 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     #delete($gene{$gn});
     $count++;
     &report_advance($count,$report,"Genes");	
-} 
+}
 
 if (scalar @OUT_LINES > 0){
-    lock ($OUT);
-    print $OUT @OUT_LINES;
-    unlock($OUT);
+    if ($rank == 0){
+        lock ($OUT);
+        print $OUT @OUT_LINES;
+        unlock($OUT);
+    }
 }
 
 # if the user want to get the correlation values print the *.correlation file
@@ -1174,7 +1151,7 @@ if (defined $print_cor){
 
 
 
-if (defined $mpi and defined $asymp){
+if (defined $mpi){
     MPI_Barrier($global_comm);
     MPI_Finalize();
 }
@@ -1274,32 +1251,62 @@ sub simulate_mnd {
 	my $vegas_null_stats = [];
 	
 	while ($SEEN->min < $target){
-		my ($sim,$c) = rmnorm($step,0,$cov,$cholesky);
+		my ($sim,$c) = rmnorm(int($step/$n_cpu),0,$cov,$cholesky);
 		my $sim_chi_df1 = $sim**2;
 		$vegas_count += dsum( $sim_chi_df1->xchg(0,1)->dsumover >= $vegas_stat);
 		push @{ $vegas_null_stats }, $sim_chi_df1->xchg(0,1)->dsumover->list;
 		my $sim_p =  1 - gsl_cdf_chisq_P($sim_chi_df1,1);
 		undef $sim_chi_df1;
 		undef $sim;
-		for (my $sim_n = 0; $sim_n < $sim_p->getdim(0); $sim_n++){
-			$fake_gene->{'pvalues'} = $sim_p->($sim_n,)->flat;
-			my $sim_n_gene_p = z_based_gene_pvalues($fake_gene,$mnd);
-			
-			my ($sim_fisher_chi_stat,$sim_fisher_df) = get_makambi_chi_square_and_df($gene_data->{cor},$gene_data->{weights},$fake_gene->{'pvalues'} );
-			my $sim_fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($sim_fisher_chi_stat, $sim_fisher_df );
-			my $sim_sidak = 1 - (1 - $fake_gene->{'pvalues'}->min)**$k;
-			
-			$SEEN->(0)++ if ( $sidak >= $sim_sidak );
-			$SEEN->(1)++ if ( $fisher >= $sim_fisher_p_value );
-			$SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
-			$SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
+        
+   
+        for (my $sim_n = 0; $sim_n < $sim_p->getdim(0); $sim_n++){
+            $fake_gene->{'pvalues'} = $sim_p->($sim_n,)->flat;
+            my $sim_n_gene_p = z_based_gene_pvalues($fake_gene,$mnd);
+            
+            my ($sim_fisher_chi_stat,$sim_fisher_df) = get_makambi_chi_square_and_df($gene_data->{cor},$gene_data->{weights},$fake_gene->{'pvalues'} );
+            my $sim_fisher_p_value = sclr double  1 - gsl_cdf_chisq_P($sim_fisher_chi_stat, $sim_fisher_df );
+            my $sim_sidak = 1 - (1 - $fake_gene->{'pvalues'}->min)**$k;
+            
+            $SEEN->(0)++ if ( $sidak >= $sim_sidak );
+            $SEEN->(1)++ if ( $fisher >= $sim_fisher_p_value );
+            $SEEN->(2)++ if ( $z_fix >= $sim_n_gene_p->{'Z_P_fix'} );
+            $SEEN->(3)++ if ( $z_random >= $sim_n_gene_p->{'Z_P_random'} );
             if (defined $g_pareto_dist){
                 push @{ $fix_null_stats    }, -1 * gsl_cdf_ugaussian_Pinv( $sim_n_gene_p->{'Z_P_fix'} );
                 push @{ $random_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_n_gene_p->{'Z_P_random'} );
                 push @{ $sidak_null_stats  }, -1 * gsl_cdf_ugaussian_Pinv( $sim_sidak );
                 push @{ $fisher_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_fisher_p_value );
             }
-		}
+        }
+        if (defined $mpi){
+
+        }
+    
+        
+        if (defined $mpi){
+            MPI_Barrier($global_comm);
+            if ($rank != 0){
+                MPI_Send([$SEEN->list],0, 12, $global_comm);
+            } else {
+                for (my $child = 0; $child < $n_cpu; $child++){
+                    next if ($child == 0);
+                    my $remote_data = MPI_Recv($child, 12, $global_comm);
+                    $SEEN->(0) += $remote_data->[0];
+                    $SEEN->(1) += $remote_data->[1];
+                    $SEEN->(2) += $remote_data->[2];
+                    $SEEN->(3) += $remote_data->[3];
+                }
+            }
+            
+            if ($rank == 0){
+                    MPI_Bcast( [$SEEN->list], 0, MPI_COMM_WORLD);
+            } else {
+                my $s = MPI_Bcast(undef, 0, MPI_COMM_WORLD);
+                $SEEN = pdl $s;
+            }
+        }
+        
 		$total += $step;
         if (defined $g_pareto_dist){
             @{ $fisher_null_stats } = sort {$b <=> $a} @{ $fisher_null_stats };

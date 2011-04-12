@@ -258,7 +258,7 @@ if (scalar @pathways == 1){
 	}
 }
 @pathways = values %PATHS;
-print_OUT("   '-> [ " . scalar (keys %PATHS) . " ] gene-sets will be analysed",$LOG);
+print_OUT("   '-> [ " . scalar @pathways . " ] gene-sets will be analysed",$LOG);
 
 my %QGS = ();
 if (defined $query_sets){
@@ -614,6 +614,7 @@ if (defined $bfile){
 		push @new_pathways, $p;
 		
 		foreach my $gn (  @{ $p->{genes} } ){
+            next if (not defined $gene_2_paths_map{$gn});
 			if (scalar @{ $gene_2_paths_map{$gn} } == 1){
 				delete($gene_data{$gn}->{genotypes});
 			} else {

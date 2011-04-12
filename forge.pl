@@ -449,157 +449,127 @@ my %gene = ();
 my $gene_counter = 0;
 my %snp_to_gene = ();
 my %ids_map = ();
-if (defined $mpi){
-    print_OUT("Will read SNP-2-gene mapping files in parallele",$LOG,$rank);
-    
-    my @names = sort {$a cmp $b} @$snpmap;
-    my $array = split_array([@names],$n_cpu);
-    for ( my $child = 0; $child < $n_cpu; $child++ ){
-        if ($rank == $child){
-            if (scalar @{$array} == 0){
-                $snpmap = [];
-            } else {
-                $snpmap  = shift @{$array};
+
+#if ($rank == 0){
+    foreach my $snp_gene_mapping_file (@$snpmap){
+        if (not -e $snp_gene_mapping_file){
+            unless ($snp_gene_mapping_file eq 'mock'){
+                print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG,$rank);
             }
-            
+            next;
         }
+        open( MAP, $snp_gene_mapping_file ) or print_OUT("Can not open [ $snp_gene_mapping_file ] file",$LOG,$rank) and exit(1);
+        print_OUT("   '-> Reading [ $snp_gene_mapping_file ]",$LOG,$rank);
+        while ( my $read = <MAP> ) {
+          chomp($read);
+          # the line is separate in gene info and snps. the section are separated by a tab.
+          my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
+            #check if gene was in the list of genes i want to analyze
+            unless ( defined $all_genes ) {
+                next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
+            }
+            if (defined $analysis_chr){
+                next if ($analysis_chr ne $chr);
+            }
+
+            my @first_snp_n_fields =  split(/\:/,$m[0]);
+          if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
+
+          # get all mapped snps within the distance threshold,
+          my @mapped_snps = ();
+          foreach my $s (@m) {
+            my ($id,$pos,$allele,$strand) = split(/\:/,$s);
+            next if (not defined $id);
+            if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
+            elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
+          }
+           
+           next if (scalar @mapped_snps == 0);
+           # create a pseudo-hash with the gene info
+           $gene{$ensembl} = {
+                'hugo'      => $hugo,
+                'ensembl'   => $ensembl,	
+                'chr'       => $chr,
+                'start'     => $start,
+                'end'       => $end,
+                'gene_type' => $gene_type,
+                'snps'      => [],
+                'minp'      => -9,
+                'genotypes' => null,
+                'geno_mat_rows' => [],
+                'cor' => null,
+                'weights' => null,
+                'pvalues' => [],
+                'effect_size' => undef,
+                'effect_size_se' => undef,
+                'gene_status' => $gene_status,
+                'desc' => $description,
+                'counter' => $gene_counter,
+           };
+
+           # go over mapped snps and change convert affy ids to rsid.
+           # and make a non-redundant set.
+           my %nr_snps = ();
+           foreach my $s (@mapped_snps) {
+              if ( defined $affy_to_rsid ) {
+                 if ($s !~ m/^rs/){
+                    if (exists $affy_id{$s}){ $s = $affy_id{$s};}
+                 }
+              }
+              # exclude snps not in the association file nor in the bim file
+              next unless ( exists $assoc_data{$s} );
+               if (not defined $mperm_dump){
+                   next unless ( exists $bim_ids{$s});
+               }
+              $nr_snps{$s} = "";
+           }
+           @mapped_snps = keys %nr_snps;
+           
+           # go over the snps mapped to the gene and check if they are in the map
+           # and association files. If so, store the min p-value for the gene.
+           # if any of the snps is in the files the remove the gene from the analysis.
+           foreach my $s (@mapped_snps) {
+              if (defined $v ){ print_OUT("Mapping [ $s ] to [ $ensembl ]",$LOG,$rank);}
+              next if ( grep $_ eq $s, @{ $gene{$ensembl}->{snps} } );
+              push @{ $snp_to_gene{$s} }, $ensembl;
+              push @{ $gene{$ensembl}->{snps} }, $s;	
+              if ( $gene{$ensembl}->{minp} == -9) {
+                 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
+              } elsif ( $assoc_data{$s}->{pvalue} < $gene{$ensembl}->{minp} ) {
+                 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
+              }
+           }
+           # remove gene if none of its snps is in the analysis.
+           if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { 
+               delete( $gene{$ensembl} ); 
+           } else { 
+               if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs",$LOG,$rank); }
+               $ids_map{$hugo} = $ensembl;	   
+           }
+           
+        }
+        close(MAP);
     }
-}
 
-foreach my $snp_gene_mapping_file (@$snpmap){
-	if (not -e $snp_gene_mapping_file){
-		unless ($snp_gene_mapping_file eq 'mock'){
-            print_OUT("   '-> File [ $snp_gene_mapping_file ] does not exist, moving on to next file",$LOG,$rank);
-        }
-		next;
-	}
-	open( MAP, $snp_gene_mapping_file ) or print_OUT("Can not open [ $snp_gene_mapping_file ] file",$LOG,$rank) and exit(1);
-	print_OUT("   '-> Reading [ $snp_gene_mapping_file ]",$LOG,$rank);
-	while ( my $read = <MAP> ) {
-	  chomp($read);
-	  # the line is separate in gene info and snps. the section are separated by a tab.
-	  my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
-		#check if gene was in the list of genes i want to analyze
-		unless ( defined $all_genes ) {
-			next unless ( ( grep $_ eq $hugo, @genes ) or ( grep $_ eq $ensembl, @genes ) );
-		}
-		if (defined $analysis_chr){
-			next if ($analysis_chr ne $chr);
-		}
+#if (defined $mpi){
+#       MPI_Bcast( \%gene, 0, MPI_COMM_WORLD);
+#       MPI_Barrier($global_comm);
+#   }
+#} else {
+#   my $remote_data = MPI_Bcast(undef, 0, MPI_COMM_WORLD);
+#    #%gene = %{$remote_data};
+#    MPI_Barrier($global_comm);
+#}
 
-		my @first_snp_n_fields =  split(/\:/,$m[0]);
-	  if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
-
-	  # get all mapped snps within the distance threshold,
-	  my @mapped_snps = ();
-	  foreach my $s (@m) {
-		my ($id,$pos,$allele,$strand) = split(/\:/,$s);
-		next if (not defined $id);
-		if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-		elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
-	  }
-	   
-	   next if (scalar @mapped_snps == 0);
-	   # create a pseudo-hash with the gene info
-	   $gene{$ensembl} = {
-			'hugo'      => $hugo,
-			'ensembl'   => $ensembl,	
-			'chr'       => $chr,
-			'start'     => $start,
-			'end'       => $end,
-			'gene_type' => $gene_type,
-			'snps'      => [],
-			'minp'      => -9,
-			'genotypes' => null,
-			'geno_mat_rows' => [],
-			'cor' => null,
-			'weights' => null,
-			'pvalues' => [],
-			'effect_size' => undef,
-			'effect_size_se' => undef,
-			'gene_status' => $gene_status,
-			'desc' => $description,
-            'counter' => $gene_counter,
-	   };
-
-	   # go over mapped snps and change convert affy ids to rsid.
-	   # and make a non-redundant set.
-	   my %nr_snps = ();
-	   foreach my $s (@mapped_snps) {
-		  if ( defined $affy_to_rsid ) {
-			 if ($s !~ m/^rs/){
-				if (exists $affy_id{$s}){ $s = $affy_id{$s};}
-			 }
-		  }
-		  # exclude snps not in the association file nor in the bim file
-		  next unless ( exists $assoc_data{$s} );
-		   if (not defined $mperm_dump){
-			   next unless ( exists $bim_ids{$s});
-		   }
-		  $nr_snps{$s} = "";
-	   }
-	   @mapped_snps = keys %nr_snps;
-	   
-	   # go over the snps mapped to the gene and check if they are in the map
-	   # and association files. If so, store the min p-value for the gene.
-	   # if any of the snps is in the files the remove the gene from the analysis.
-	   foreach my $s (@mapped_snps) {
-		  if (defined $v ){ print_OUT("Mapping [ $s ] to [ $ensembl ]",$LOG,$rank);}
-		  next if ( grep $_ eq $s, @{ $gene{$ensembl}->{snps} } );
-		  push @{ $snp_to_gene{$s} }, $ensembl;
-		  push @{ $gene{$ensembl}->{snps} }, $s;	
-		  if ( $gene{$ensembl}->{minp} == -9) {
-			 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-		  } elsif ( $assoc_data{$s}->{pvalue} < $gene{$ensembl}->{minp} ) {
-			 $gene{$ensembl}->{minp} = $assoc_data{$s}->{pvalue};
-		  }
-	   }
-	   # remove gene if none of its snps is in the analysis.
-	   if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { 
-		   delete( $gene{$ensembl} ); 
-	   } else { 
-		   if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs",$LOG,$rank); }
-		   $ids_map{$hugo} = $ensembl;	   
-	   }
-	   
-	}
-	close(MAP);
-}
-
-if (defined $mpi){
-    # wait for all processes to finish reading files
-    MPI_Barrier($global_comm);
-    if ($rank != 0){
-        if (scalar (keys %gene) == 0){
-            MPI_Send(\{},0, 12, $global_comm);        
-        } else {
-            MPI_Send(\%gene,0, 12, $global_comm);
-        }
-    } else { 
-        for (my $child = 0; $child < $n_cpu; $child++){
-            next if ($child == 0);
-            my $remote_data = MPI_Recv($child, 12, $global_comm);
-            %gene = (%gene,%{$remote_data});
-        }
-    }
-    if ($rank == 0){
-        MPI_Bcast( \%gene, 0, MPI_COMM_WORLD);
-        MPI_Barrier($global_comm);
-    } else {
-        my $remote_data = MPI_Bcast(undef, 0, MPI_COMM_WORLD);
-        %gene = %{$remote_data};        
-        MPI_Barrier($global_comm);
-    }
-}
 print_OUT("  '->[ " . scalar (keys %gene) . " ] Genes read from SNP-2-Gene Mapping files",$LOG,$rank);
 print_OUT("  '->[ " . scalar (keys %snp_to_gene) . " ] SNPs mapped to Genes and with association results will be analyzed",$LOG,$rank);
 
-
-# complain if there is genes ledt for analysis
+# complain if there are not genes left for analysis
 if (scalar keys %gene == 0){
         print_OUT("No genes mapped",$LOG,$rank);
         exit(1);
 }
+
 
 # read gene-set definition file
 if (defined $gmt){
@@ -788,7 +758,6 @@ if (defined $bfile) {
 # the SNP genotype will be deleted after is no longer needed.
 # this reduces the IO and speeds up
 my %snp_genotype_stack = ();
-
 foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gene){
     # GET SNP GENOTYPE MATRIX
     
@@ -956,12 +925,12 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     &report_advance($count,$report,"  '-> Gene genotypes read");	
 }
 #if ($rank == 0){
-    if (defined $bfile) {
-        $bed->close();
-    } elsif (defined $geno_probs){
-        $gprobs->close();
-    }
-    #}
+if (defined $bfile) {
+    $bed->close();
+} elsif (defined $geno_probs){
+    $gprobs->close();
+}
+#}
 
 
 print_OUT("Starting to calculate gene p-values",$LOG,$rank);
@@ -1279,9 +1248,6 @@ sub simulate_mnd {
                 push @{ $fisher_null_stats }, -1 * gsl_cdf_ugaussian_Pinv( $sim_fisher_p_value );
             }
         }
-        if (defined $mpi){
-
-        }
     
         
         if (defined $mpi){
@@ -1300,9 +1266,9 @@ sub simulate_mnd {
             }
             
             if ($rank == 0){
-                    MPI_Bcast( [$SEEN->list], 0, MPI_COMM_WORLD);
+                    MPI_Bcast( [$SEEN->list], 0, $global_comm);
             } else {
-                my $s = MPI_Bcast(undef, 0, MPI_COMM_WORLD);
+                my $s = MPI_Bcast(undef, 0, $global_comm);
                 $SEEN = pdl $s;
             }
         }

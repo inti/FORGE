@@ -1,3 +1,10 @@
+lambda<-function(p){ 
+  median( qchisq(1-p,df=1)  )/0.456
+}
+apply_gc<-function(p,lambda){
+    pchisq( qchisq(1-p,df=1)/lambda,df=1)
+}
+
 my_make_positive_definite <- function (cov_in) {
   cov_out<-NULL
   if ( is.positive.definite(cov_in) == FALSE){  

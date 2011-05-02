@@ -10,9 +10,9 @@ affy2rsid<-"FALSE"
 header<-"FALSE"
 snp_annot<-NULL
 gene_annot<-NULL
-
-bfile="hm3_ceu.chr22"
-assoc_file="~/DATA/WTCCC/WEB/basic/WTCCC_BD_imputed.txt_plusQC.filtered.pvals"
+annot_folder<-NULL
+#bfile="hm3_ceu.chr22"
+#assoc_file="~/DATA/WTCCC/WEB/basic/WTCCC_BD_imputed.txt_plusQC.filtered.pvals"
 report=10
 #snp_annot="29April2011.snp_annot.txt"
 #gene_annot="29April2011.gene_annot.txt"
@@ -46,14 +46,17 @@ step<-as.numeric(step)
 MAX<-as.numeric(MAX)
 distance<-as.numeric(distance)*1000
 header<-as.logical(header)
+annot_folder<-as.character(annot_folder)
 ######
 cat("Loading necessary libraries\n")
 cat("snpMatrix\n")
 library(snpMatrix)
 cat("corpcor\n")
 library(corpcor)
-cat("biomaRt\n")
-library(biomaRt)
+if ( is.null(annot_folder) == TRUE ){
+    cat("biomaRt\n")
+    library(biomaRt)
+}
 cat("IRanges\n")
 library(IRanges)
 cat("local functions [ functions.R ]\n")
@@ -68,14 +71,7 @@ fam<-paste(bfile,".fam",sep="")
 
 genotypes<-read.plink(bed,bim,fam)
 
-if (is.null(gene_annot) ==FALSE){
-    cat("Reading gene annotation from [ ", gene_annot," ]\n",sep="")
-    ENSEMBL_GENES<-read.table(gene_annot,header=T,sep="\t")
-} else {
-    cat("Getting gene annotation from ensembl\n")
-    genemart = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-    ENSEMBL_GENES<-getBM(attributes = c("ensembl_gene_id","hgnc_symbol", "chromosome_name", "start_position","end_position", "band","gene_biotype"), mart = genemart)
-}
+
 cat("Reading SNP p-values from [ ",assoc_file," ]\n",sep="")
 assoc<-read.table(assoc_file,header=header)
 cat("   '-> [ ",nrow(assoc)," ] rows read\n",sep="")
@@ -98,23 +94,36 @@ if (affy2rsid != "FALSE"){
     assoc<-rbind(assoc,with_affy_ids[,c("SNP","P")])
 }
 
-# get set of SNPs with stats and genotypes
-genotyped_snps<-as.data.frame(colnames(genotypes))
-colnames(genotyped_snps)<-c("SNP")
-working_snps<-merge(genotyped_snps,assoc,by.x="SNP",by.y="SNP")
-cat("[ ",nrow(working_snps)," ] SNPs with genotypes and statitics\n",sep="")
 
-cat("Deleting genotypes of unused SNPs\n",sep="")
+#cat("Deleting genotypes of unused SNPs\n",sep="")
 #genotypes<-genotypes[,working_snps$SNP]
+ENSEMBL_GENES<-NULL
+if (is.null(gene_annot) ==FALSE){
+    cat("Reading gene annotation from [ ", gene_annot," ]\n",sep="")
+    ENSEMBL_GENES<-read.table(gene_annot,header=T,sep="\t",colClasses=c('character','character','character','numeric','numeric','character','character'))
+} else if (is.null(annot_folder) == TRUE) {
+    cat("Getting gene annotation from ensembl\n")
+    genemart = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+    ENSEMBL_GENES<-getBM(attributes = c("ensembl_gene_id","hgnc_symbol", "chromosome_name", "start_position","end_position", "band","gene_biotype"), mart = genemart)
+} 
+
 snp<-NULL
 if (is.null(snp_annot) ==FALSE){
     cat("Reading SNP annotation from [ ", snp_annot," ]\n",sep="")
-    snp<-read.table(snp_annot,header=T,sep="\t")
-} else {
+    snp<-read.table(snp_annot,header=T,sep="\t",colClasses=c('character','character','numeric','numeric','numeric','character'))
+} else if (is.null(annot_folder) == TRUE ){
     cat("Annotating SNPs\n")
+    
+    # get set of SNPs with stats and genotypes
+    genotyped_snps<-as.data.frame(colnames(genotypes))
+    colnames(genotyped_snps)<-c("SNP")
+    working_snps<-merge(genotyped_snps,assoc,by.x="SNP",by.y="SNP")
+    
+    cat("[ ",nrow(working_snps)," ] SNPs with genotypes and statitics\n",sep="")
     snpmart = useMart("snp", dataset = "hsapiens_snp")
     snp<-getBM(c("refsnp_id","chr_name","chrom_start", "chrom_strand","mapweight","allele"), filters="refsnp",values=working_snps$SNP,mart = snpmart)
-}
+} 
+
 
 if (save_annot!="FALSE"){
     cat("Saving Gene and SNP annotation to [ ",save_annot,".gene_annot.txt ] and [ ",save_annot,".snp_annot.txt ]\n",sep="")
@@ -123,17 +132,35 @@ if (save_annot!="FALSE"){
     write.table(snp,file=snp_out,sep="\t",col.names=T,row.names=F,quote=F)
     write.table(ENSEMBL_GENES,file=gene_out,sep="\t",col.names=T,row.names=F,quote=F)
 }
-# reduce SNP set to the working set
-snp<-merge(snp,working_snps,by.x="refsnp_id",by.y="SNP")
 
 DATA_OUT<-NULL
 header<-c("ensembl_gene_id","hgnc_symbol","chromosome_name","start_position","end_position","band","gene_biotype","SIDAK","FISHER","Z_FIX","Z_RANDOM","SEEN_SIDAK","SEEN_FISHER","SEEN_Z_FIX","SEEN_Z_RANDOM","N","I2","Q","tau_squared","N_SNPs")
 write.table(t(header), file=outfile,append=F,col.names=F,row.names=F,quote=F,sep="\t")
-# get list of all chromosomes
-all_chrs<-unique(ENSEMBL_GENES$chromosome_name)
+
+assoc_genotyped<-NULL
+if ( is.null(annot_folder) == FALSE ) {
+    cat("Reading SNP annotation from folder [ ",annot_folder," ]\n")
+    # get set of SNPs with stats and genotypes
+    genotyped_snps<-as.data.frame(colnames(genotypes))
+    colnames(genotyped_snps)<-c("SNP")
+    assoc_genotyped<-merge(assoc,genotyped_snps,assoc,by.x="SNP",by.y="SNP")
+}
 gene_counter=0
-# loop over all chromosomes
+# get list of all chromosomes
+all_chrs<-sort(unique(ENSEMBL_GENES$chromosome_name))
+# loop over all chromosomes 
 for(chr in all_chrs){ 
+    if ( is.null(annot_folder) == FALSE ) {
+        # loop over all chromosomes
+        #rm(snp)
+        cat("Loading SNP data for chromsome [ ",chr," ]\n",sep="")
+        file<-paste(annot_folder,"chromosome.",chr,".annot.RData",sep="")
+        load(file)
+        # reduce SNP set to the working set
+        working_snps<-merge(snp,assoc_genotyped,by.x="refsnp_id",by.y="SNP")
+        snp<-unique(working_snps)
+        cat("    - [ ",nrow(snp)," ] SNPs with genotypes and statitics\n",sep="")
+    }
     # select SNPs in the chromosome
     snp_chr<-snp[which(snp$chr_name == chr),]
     # check if there are SNPs mapped to the chromsome

@@ -1,5 +1,9 @@
+print_OUT<-function(string,LOG){
+  print(paste(date(),"      ",string),quote = FALSE)  
+}
+
 lambda<-function(p){ 
-  median( qchisq(1-p,df=1)  )/0.456
+  median( qchisq(1-p,df=1),na.rm=T  )/0.456
 }
 apply_gc<-function(p,lambda){
     pchisq( qchisq(1-p,df=1)/lambda,df=1)
@@ -31,23 +35,23 @@ modified_fisher<-function(p,w=rep(1/length(p),length(p)),cor = diag(1,length(p))
 	diag(cor) <- 0;
   cor = (3.263*abs(cor) + 0.710*(abs(cor)^2) + 0.027*(abs(cor)^3))
   df = 8/( sum( w * w * cor ) + 4*sum(w^2) )
-  chi_stat = (sum(-2 * log(p) * w)/2) * df;
+  chi_stat = (sum(-2 * log(p) * w,na.rm=TRUE)/2) * df;
   return(list('p' = pchisq(chi_stat,df=df,lower.tail=F), "chi"=chi_stat,"df"=df))
 }
 
 z_fix_and_random_effects<-function(z,w = rep(1/length(z),length(z)),cov = diag(1,length(z))){
-    z_fix<- sum(z*w)/sum(w)
-    v_fix<- sum( w %x% t(w) * cov )
-    
+    z_fix<- sum(z*w)/sum(w,na.rm=TRUE)
+    v_fix<- sum( w %x% t(w) * cov ,na.rm=TRUE)
     
     Q = 0.0
     {
   	  cor = cov
   		diag(cor) <- 0;
 		  cor = (3.263*abs(cor) + 0.710*(abs(cor)^2) + 0.027*(abs(cor)^3))
-		  df = 8/(sum( w %x% t(w) * cov ) + 4*sum(w^2))
-		  Q_naive = sum (w * ((z_fix - z)^2));
+		  df = 8/(sum( w %x% t(w) * cov ,na.rm=TRUE) + 4*sum(w^2,na.rm=TRUE))
+		  Q_naive = sum (w * ((z_fix - z)^2),na.rm=TRUE);
 		  Q = qchisq( pchisq(df*0.5*Q_naive, df=df), df= length(z) - 1)
+      if (is.na(Q) == T) { Q = 0.0;}
 	  }
     I_squared = 0.0;
     if (Q > (length(z) - 1)){
@@ -55,11 +59,11 @@ z_fix_and_random_effects<-function(z,w = rep(1/length(z),length(z)),cov = diag(1
 	  }
     tau_squared = 0.0;
     if (Q > (length(z) - 1)){
-		  tau_squared = (Q - (length(z) - 1))/(sum(w) - sum(w^2)/sum(w))
+		  tau_squared = (Q - (length(z) - 1))/(sum(w,na.rm=TRUE) - sum(w^2,na.rm=TRUE)/sum(w,na.rm=TRUE))
 	  }
     w_star = 1/( tau_squared + 1/w);
-    z_random<- sum(z*w_star)/sum(w_star)
-    v_random<- sum( w_star %x% t(w_star) * cov )
+    z_random<- sum(z*w_star,na.rm=TRUE)/sum(w_star,na.rm=TRUE)
+    v_random<- sum( w_star %x% t(w_star) * cov ,na.rm=TRUE)
     
     return(
         list( "z_fix" = z_fix,
@@ -118,7 +122,7 @@ rmvnorm<-function (n, mean = rep(0, nrow(sigma)), sigma = diag(length(mean)),
 report_advance<-function(index,report,tag) {
   if (index > 0){
    if ( ( (index /report ) - round(index/report) ) == 0) {
-     cat(" '->Done with [ ",index," ] ",tag,"\n",sep=""); 
+     print_OUT(paste("   '->Done with [ ",index," ] ",tag,sep="")); 
    }
   }
 }

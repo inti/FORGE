@@ -261,7 +261,6 @@ for(chr in all_chrs){
             } # else more than 1 SNP
         } 
         if (opt$asymp == TRUE) {
-            cat("i am gere\n\n")
             if (nrow(gene_snps) == 1){
                 MND_P<-rep(gene_snps$P,4)
                 ready<-unlist(c(gene_data,rep(gene_snps$P,5),-1,-1,-1,1))

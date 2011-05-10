@@ -294,6 +294,7 @@ for(chr in all_chrs){
             }
         }
         # merge data into output and print out
+
         if (is.null(DATA_OUT) == TRUE) { 
             DATA_OUT<-as.data.frame(t(ready))  
         } else {

@@ -21,7 +21,9 @@ option_list <- list(
     make_option(c("--snp_annot"), type="character", default=NULL, help="File with SNP annotations", metavar=NULL),
     make_option(c("--gene_annot"), type="character", default=NULL, help="File with gene annotation", metavar=NULL),
     make_option(c("--annot_folder"), type="character", default="annotation/ensemblv62/", help="Folder with RData SNP annotations. default: annotation/ensemblv62/ ", metavar=NULL),
-    make_option(c("--chr"), type="character", default=NULL, help="Analyze this chromosome", metavar=NULL)
+    make_option(c("--chr"), type="character", default=NULL, help="Analyze this chromosome", metavar=NULL),
+    make_option(c("--asymp"), action="store_true", default=TRUE,  help="Perform analysis using asymptotic approximations", metavar=NULL),
+    make_option(c("--mnd"), action="store_true", default=FALSE,  help="Perform analysis using MND simulation approximation", metavar=NULL)
 )
 
 # get command line options, if help option encountered print help and exit, 
@@ -183,78 +185,115 @@ for(chr in all_chrs){
         } else {
             #cat(nrow(gene_snps)," SNPs mapped to gene [ ",gene_data$ensembl_gene_id," ",gene_data$hgnc_symbol," ]\n",sep="")  
         }
-        if (nrow(gene_snps) == 1){
-            MND_P<-rep(gene_snps$P,4)
-            SEEN<-rep(-1,4)
-            TOTAL<-0
-            ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,-1,-1,-1,1))
-        } else {
-            # extract genotypes
-            gene_genotypes<-as(genotypes[,gene_snps$refsnp_id],'numeric')
-            gene_genotypes[is.na(gene_genotypes)]<-4
-            # calculate pearson correlation
-            #gene_genotypes_cor<-cor(gene_genotypes,use="pairwise.complete.obs")
-            gene_genotypes_cor<-cor.shrink(gene_genotypes,verbose=FALSE)
-            gene_genotypes_cor<-unclass(gene_genotypes_cor)
-            # set NA due to missing data to 0
-            gene_genotypes_cor[is.na(gene_genotypes_cor)]<-0
-            # make the correlation matrix positive definite
-            gene_genotypes_cor<-my_make_positive_definite(gene_genotypes_cor)
-            # calculate gene p-values
-            # apply simulatin based method
-  
-            gene_snps[which(gene_snps$P > (1 - .Machine$double.eps)),"P"]<-1 - .Machine$double.eps
-            w<-rep(1/length(gene_snps$P),length(gene_snps$P))
-            min_p<-min(gene_snps$P,na.rm=T)
-            sidak<-1-(1 - min_p)^nrow(gene_genotypes_cor)
-            fisher<-modified_fisher(p=gene_snps$P,w=w,cor=gene_genotypes_cor)
-            w<-rep(1/nrow(gene_genotypes_cor),nrow(gene_genotypes_cor))
-            z<-qnorm(gene_snps$P,lower.tail=F)
 
-            Z_methods<-z_fix_and_random_effects(z=z,w=w,cov=gene_genotypes_cor)
-            SEEN<-rep(0,4)
-            TOTAL<-0    
-            running_step<-10
-            while (min(SEEN) < opt$target){
-                my_sim_z<-rmvnorm(running_step,sigma=gene_genotypes_cor)
-                index=1
-                sim_counter<-0
-                for (index in 1:nrow(my_sim_z)){ 
-                    z_sim<-my_sim_z[index,]
-                    sim_p<-pchisq(z_sim^2,df=1,lower.tail=F)
-                    z_sim<-qnorm(sim_p,lower.tail=F)
-                    sim_Z_methods<-z_fix_and_random_effects(z=z_sim,w=w,cov=gene_genotypes_cor); 
-                    sim_min_p<-min(sim_p,na.rm=T)
-                    sim_fisher<-modified_fisher(p=sim_p,w=w,cor=gene_genotypes_cor)
-                    if (sim_min_p <= min_p){
-                        SEEN[1]<-SEEN[1]+1
+        if (opt$mnd == TRUE){
+            if (nrow(gene_snps) == 1){
+                MND_P<-rep(gene_snps$P,4)
+                SEEN<-rep(-1,4)
+                TOTAL<-0
+                ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,-1,-1,-1,1))
+            } else {
+                # extract genotypes
+                gene_genotypes<-as(genotypes[,gene_snps$refsnp_id],'numeric')
+                gene_genotypes[is.na(gene_genotypes)]<-4
+                # calculate pearson correlation
+                #gene_genotypes_cor<-cor(gene_genotypes,use="pairwise.complete.obs")
+                gene_genotypes_cor<-cor.shrink(gene_genotypes,verbose=FALSE)
+                gene_genotypes_cor<-unclass(gene_genotypes_cor)
+                # set NA due to missing data to 0
+                gene_genotypes_cor[is.na(gene_genotypes_cor)]<-0
+                # make the correlation matrix positive definite
+                gene_genotypes_cor<-my_make_positive_definite(gene_genotypes_cor)
+                # calculate gene p-values
+                # apply simulatin based method
+      
+                gene_snps[which(gene_snps$P > (1 - .Machine$double.eps)),"P"]<-1 - .Machine$double.eps
+                w<-rep(1/length(gene_snps$P),length(gene_snps$P))
+                min_p<-min(gene_snps$P,na.rm=T)
+                sidak<-1-(1 - min_p)^nrow(gene_genotypes_cor)
+                fisher<-modified_fisher(p=gene_snps$P,w=w,cor=gene_genotypes_cor)
+                w<-rep(1/nrow(gene_genotypes_cor),nrow(gene_genotypes_cor))
+                z<-qnorm(gene_snps$P,lower.tail=F)
+                gene_genotypes_cor<-gates_transform_corr(gene_genotypes_cor)
+                Z_methods<-z_fix_and_random_effects(z=z,w=w,cov=gene_genotypes_cor)
+                SEEN<-rep(0,4)
+                TOTAL<-0    
+                running_step<-10
+                while (min(SEEN) < opt$target){
+                    my_sim_z<-rmvnorm(running_step,sigma=gene_genotypes_cor)
+                    index=1
+                    sim_counter<-0
+                    for (index in 1:nrow(my_sim_z)){ 
+                        z_sim<-my_sim_z[index,]
+                        sim_p<-pchisq(z_sim^2,df=1,lower.tail=F)
+                        z_sim<-qnorm(sim_p,lower.tail=F)
+                        sim_Z_methods<-z_fix_and_random_effects(z=z_sim,w=w,cov=gene_genotypes_cor); 
+                        sim_min_p<-min(sim_p,na.rm=T)
+                        sim_fisher<-modified_fisher(p=sim_p,w=w,cor=gene_genotypes_cor)
+                        if (sim_min_p <= min_p){
+                            SEEN[1]<-SEEN[1]+1
+                        }
+                        if (sim_fisher$p <= fisher$p){
+                            SEEN[2]<-SEEN[2]+1          
+                        }
+                        if (sim_Z_methods$P_FIX <= Z_methods$P_FIX){
+                            SEEN[3]<-SEEN[3]+1
+                        }
+                        if (sim_Z_methods$P_RANDOM <= Z_methods$P_RANDOM){
+                            SEEN[4]<-SEEN[4]+1
+                        }
+                        sim_counter<-sim_counter+1
+                        if (min(SEEN) > 9){
+                          running_step<-sim_counter
+                          break;  
+                        }
+                    } # for
+                    TOTAL<-TOTAL+running_step
+                    running_step<-running_step*10
+                    if (running_step > opt$max_step){
+                        running_step<-opt$max_step  
                     }
-                    if (sim_fisher$p <= fisher$p){
-                        SEEN[2]<-SEEN[2]+1          
-                    }
-                    if (sim_Z_methods$P_FIX <= Z_methods$P_FIX){
-                        SEEN[3]<-SEEN[3]+1
-                    }
-                    if (sim_Z_methods$P_RANDOM <= Z_methods$P_RANDOM){
-                        SEEN[4]<-SEEN[4]+1
-                    }
-                    sim_counter<-sim_counter+1
-                    if (min(SEEN) > 9){
-                      running_step<-sim_counter
-                      break;  
-                    }
-                } # for
-                TOTAL<-TOTAL+running_step
-                running_step<-running_step*10
-                if (running_step > opt$max_step){
-                    running_step<-opt$max_step  
-                }
-                #cat(TOTAL,SEEN,"\n")
-                if (TOTAL > opt$max_mnd){ break;}
-            }# while 
-            MND_P<-(SEEN+1)/(TOTAL+1)
-            ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))
-        } # else more than 1 SNP 
+                    #cat(TOTAL,SEEN,"\n")
+                    if (TOTAL > opt$max_mnd){ break;}
+                }# while 
+                MND_P<-(SEEN+1)/(TOTAL+1)
+                ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))
+            } # else more than 1 SNP
+        } 
+        if (opt$asymp == TRUE) {
+            cat("i am gere\n\n")
+            if (nrow(gene_snps) == 1){
+                MND_P<-rep(gene_snps$P,4)
+                ready<-unlist(c(gene_data,rep(gene_snps$P,5),-1,-1,-1,1))
+            } else {
+                # extract genotypes
+                gene_genotypes<-as(genotypes[,gene_snps$refsnp_id],'numeric')
+                gene_genotypes[is.na(gene_genotypes)]<-4
+                # calculate pearson correlation
+                #gene_genotypes_cor<-cor(gene_genotypes,use="pairwise.complete.obs")
+                gene_genotypes_cor<-cor.shrink(gene_genotypes,verbose=FALSE)
+                gene_genotypes_cor<-unclass(gene_genotypes_cor)
+                # set NA due to missing data to 0
+                gene_genotypes_cor[is.na(gene_genotypes_cor)]<-0
+                # make the correlation matrix positive definite
+                gene_genotypes_cor<-my_make_positive_definite(gene_genotypes_cor)
+                # calculate gene p-values
+                # apply simulatin based method
+
+                gene_snps[which(gene_snps$P > (1 - .Machine$double.eps)),"P"]<-1 - .Machine$double.eps
+                w<-rep(1/length(gene_snps$P),length(gene_snps$P))
+                min_p<-min(gene_snps$P,na.rm=T)
+                sidak<-1-(1 - min_p)^nrow(gene_genotypes_cor)
+                fisher<-modified_fisher(p=gene_snps$P,w=w,cor=gene_genotypes_cor)
+                w<-rep(1/nrow(gene_genotypes_cor),nrow(gene_genotypes_cor))
+                z<-qnorm(gene_snps$P,lower.tail=F)
+                gene_genotypes_cor<-gates_transform_corr(gene_genotypes_cor)
+                Z_methods<-z_fix_and_random_effects(z=z,w=w,cov=gene_genotypes_cor)
+
+                ready<-unlist(c(gene_data,min_p,sidak,fisher,Z_methods$P_FIX,Z_methods$P_RANDOM,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))                    
+            }
+        }
+        # merge data into output and print out
         if (is.null(DATA_OUT) == TRUE) { 
             DATA_OUT<-as.data.frame(t(ready))  
         } else {

@@ -39,6 +39,11 @@ modified_fisher<-function(p,w=rep(1/length(p),length(p)),cor = diag(1,length(p))
   return(list('p' = pchisq(chi_stat,df=df,lower.tail=F), "chi"=chi_stat,"df"=df))
 }
 
+gates_transform_corr<-function(x){
+    x<-0.2982*(x^6) - 0.0127*(x^5) + 0.0588*(x^4) + 0.0099*(x^3) + 0.6281*(x^2) - 0.0009*x; 
+    return (x);
+}
+
 z_fix_and_random_effects<-function(z,w = rep(1/length(z),length(z)),cov = diag(1,length(z))){
     z_fix<- sum(z*w)/sum(w,na.rm=TRUE)
     v_fix<- sum( w %x% t(w) * cov ,na.rm=TRUE)

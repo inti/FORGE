@@ -40,7 +40,7 @@ modified_fisher<-function(p,w=rep(1/length(p),length(p)),cor = diag(1,length(p))
 }
 
 gates_transform_corr<-function(x){
-    x<-0.2982*(x^6) - 0.0127*(x^5) + 0.0588*(x^4) + 0.0099*(x^3) + 0.6281*(x^2) - 0.0009*x; 
+    x<- (x/abs(x))*(0.2982*(x^6) - 0.0127*(x^5) + 0.0588*(x^4) + 0.0099*(x^3) + 0.6281*(x^2) - 0.0009*x); 
     return (x);
 }
 

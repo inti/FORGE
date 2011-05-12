@@ -125,7 +125,12 @@ if (opt$save_annot!="FALSE"){
 }
 
 DATA_OUT<-NULL
-header<-c("ensembl_gene_id","hgnc_symbol","chromosome_name","start_position","end_position","band","gene_biotype","SIDAK","FISHER","Z_FIX","Z_RANDOM","SEEN_SIDAK","SEEN_FISHER","SEEN_Z_FIX","SEEN_Z_RANDOM","N","I2","Q","tau_squared","N_SNPs")
+if (opt$mnd){
+header<-c("ensembl_gene_id","hgnc_symbol","chromosome_name","start_position","end_position","band","gene_biotype","MIN_P","SIDAK","FISHER","Z_FIX","Z_RANDOM","SEEN_SIDAK","SEEN_FISHER","SEEN_Z_FIX","SEEN_Z_RANDOM","N","I2","Q","tau_squared","N_SNPs")
+}
+if (opt$asymp){
+    header<-c("ensembl_gene_id","hgnc_symbol","chromosome_name","start_position","end_position","band","gene_biotype","MIN_P","SIDAK","FISHER","Z_FIX","Z_RANDOM","I2","Q","tau_squared","N_SNPs")
+}
 write.table(t(header), file=opt$outfile,append=F,col.names=F,row.names=F,quote=F,sep="\t")
 
 assoc_genotyped<-NULL
@@ -188,7 +193,7 @@ for(chr in all_chrs){
 
         if (opt$mnd == TRUE){
             if (nrow(gene_snps) == 1){
-                MND_P<-rep(gene_snps$P,4)
+                MND_P<-rep(gene_snps$P,5)
                 SEEN<-rep(-1,4)
                 TOTAL<-0
                 ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,-1,-1,-1,1))
@@ -257,7 +262,7 @@ for(chr in all_chrs){
                     if (TOTAL > opt$max_mnd){ break;}
                 }# while 
                 MND_P<-(SEEN+1)/(TOTAL+1)
-                ready<-unlist(c(gene_data,MND_P,SEEN,TOTAL,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))
+                ready<-unlist(c(gene_data,min_p,MND_P,SEEN,TOTAL,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))
             } # else more than 1 SNP
         } 
         if (opt$asymp == TRUE) {
@@ -287,9 +292,9 @@ for(chr in all_chrs){
                 w<-rep(1/nrow(gene_genotypes_cor),nrow(gene_genotypes_cor))
                 z<-qnorm(gene_snps$P,lower.tail=F)
                 gene_genotypes_cor<-gates_transform_corr(gene_genotypes_cor)
+                diag(gene_genotypes_cor)<-1
                 Z_methods<-z_fix_and_random_effects(z=z,w=w,cov=gene_genotypes_cor)
-
-                ready<-unlist(c(gene_data,min_p,sidak,fisher,Z_methods$P_FIX,Z_methods$P_RANDOM,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))                    
+                ready<-unlist(c(gene_data,min_p,sidak,fisher,Z_methods$P_FIX,Z_methods$P_RANDOM,Z_methods$I2,Z_methods$Q,Z_methods$tau_squared,nrow(gene_genotypes_cor)))
             }
         }
         # merge data into output and print out

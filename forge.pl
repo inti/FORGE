@@ -913,7 +913,7 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     %correlation = (%correlation,%{$more_corrs});
     if (defined $gates_corr){
         $gene{$gn}->{cor} = gates_p_sham_ld_to_pvalue_correlation( $gene{$gn}->{cor} );
-        $gene{$gn}->{cor_ld_r} = gates_p_sham_ld_to_pvalue_correlation( $gene{$gn}->{cor_ld_r} );
+        #$gene{$gn}->{cor_ld_r} = gates_p_sham_ld_to_pvalue_correlation( $gene{$gn}->{cor_ld_r} );
     }
     # Calculate the weights for the gene
     $gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);

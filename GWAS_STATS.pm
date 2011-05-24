@@ -27,8 +27,8 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw(  rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
-@EXPORT_OK = qw(  rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
+@EXPORT = qw(  gates_p_sham_ld_to_pvalue_correlation rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues);	# symbols to export by default
+@EXPORT_OK = qw(  gates_p_sham_ld_to_pvalue_correlation rmnorm get_maf get_fix_and_radom_meta_analysis get_makambi_chi_square_and_df calculate_LD_stats get_lambda_genomic_control number_effective_tests z_based_gene_pvalues); # symbols to export on request
 
 
 
@@ -45,6 +45,13 @@ sub rmnorm {
 	my $z = $vector x $chol->transpose;
 	my $y = transpose( $mean + transpose($z));
 	return($y,$chol);
+}
+
+sub gates_p_sham_ld_to_pvalue_correlation {
+    my $x = shift;
+    my $sign = ($x/abs($x));
+    $x = $sign*( 0.2982*($x**6) - 0.0127*($x**5) + 0.0588*($x**4) + 0.0099*($x**3) + 0.6281*($x**2) - 0.0009*$x); 
+    return ($x);
 }
 
 

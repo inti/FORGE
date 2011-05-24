@@ -29,7 +29,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
 	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump,$asymp,
-    $low_mem,$g_pareto_dist
+    $low_mem,$g_pareto_dist, $gates_corr
 );
 
 GetOptions(
@@ -77,6 +77,7 @@ GetOptions(
     'asymp|asymptotic' => \$asymp,
     'low_mem' => \$low_mem,
     'g_pareto_dist|gpd' => \$g_pareto_dist,
+    'gates_corr' => \$gates_corr,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -910,7 +911,10 @@ foreach my $gn (sort { $gene{$a}->{counter} <=> $gene{$b}->{counter} } keys %gen
     my $more_corrs = "";
     ($gene{$gn}->{cor},$gene{$gn}->{cor_ld_r},$more_corrs)  = deal_with_correlations($gene{$gn},\%correlation,$use_ld_as_corr);
     %correlation = (%correlation,%{$more_corrs});
-    
+    if (defined $gates_corr){
+        $gene{$gn}->{cor} = gates_p_sham_ld_to_pvalue_correlation( $gene{$gn}->{cor} );
+        $gene{$gn}->{cor_ld_r} = gates_p_sham_ld_to_pvalue_correlation( $gene{$gn}->{cor_ld_r} );
+    }
     # Calculate the weights for the gene
     $gene{$gn}->{weights} = deal_with_weights(\@weights_file,$gene{$gn},$w_maf,$weights);
     
@@ -1567,6 +1571,7 @@ script [options]
 	-correlation, -cor	SNP-SNP correlation file
 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
 	-use_ld				Use Linkage Disequilibrium as measure of SNP-SNP correlation
+    -gates_corr         Transform SNP-SNP correlation to p-value correlation using the method presented by Li MX et al. (2011). Am J Hum Genet 88: 283-293.
 	-lambda			lambda value to correct SNP statistics, if genomic control is used
 	-gc_correction		Determine the lamda for the genomic control correction from the input p-values
 	-gmt_min_size		Min number of genes in gene-sets to be analysed. default = 2

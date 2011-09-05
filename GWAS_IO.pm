@@ -36,6 +36,7 @@ sub read_gmt {
 	open( GMT, $file ) or print_OUT("Cannot open [ $file ]") and die $!;
     my %back = ();
 	while ( my $path = <GMT> ) {
+        chomp($path);
 		my ( $p_name, $p_desc, @p_genes ) = split( /\t/, $path );
         next if (exists $back{ $p_name });
         $back{ $p_name } = { 

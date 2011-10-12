@@ -517,7 +517,7 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 	   if ( scalar @{ $gene{$ensembl}->{snps} } == 0 ) { 
 		   delete( $gene{$ensembl} ); 
 	   } else { 
-		   if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ ", scalar @{ $gene{$ensembl}->{snps} }, " ] mapped SNPs",$LOG); }
+		   if (defined $v ){ print_OUT("Gene $ensembl $hugo included in the analysis with [ " . scalar @{ $gene{$ensembl}->{snps} } . " ] mapped SNPs",$LOG); }
 		   $ids_map{$hugo} = $ensembl;	   
 	   }
 	   

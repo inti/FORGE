@@ -143,6 +143,7 @@ if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lam
 if (not defined $test_name){
 	$test_name = 'ADD';	
 }
+$test_name = uc($test_name);
 print_OUT("Will analyse SNPs association restuls of type [ $test_name].")
 # define option to read genotype probability files
 my $geno_probs = undef;

@@ -29,7 +29,7 @@ our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
 	$gmt_min_size,$gmt_max_size, $use_ld_as_corr,$mnd_sim_target, 
 	$mnd_sim_max, $mnd_sim_wise_correction_methods, $mnd,$mperm_dump,$asymp,
-    $low_mem,$g_pareto_dist, $gates_corr
+    $low_mem,$g_pareto_dist, $gates_corr, $test_name
 );
 
 GetOptions(
@@ -78,6 +78,7 @@ GetOptions(
     'low_mem' => \$low_mem,
     'g_pareto_dist|gpd' => \$g_pareto_dist,
     'gates_corr' => \$gates_corr,
+    'test_name=s' => \$test_name,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -139,7 +140,10 @@ defined $print_cor and print_OUT("Defined -print_cor: I will print the *.correla
 defined $out or $out = "gene_based_fisher_v041.OUT";
 # tell if user wants to correct p-values by genomic control 
 if ($lambda != 1){ print_OUT("SNP p-value will be corrected with lambda = [ $lambda ]",$LOG);}
-
+if (not defined $test_name){
+	$test_name = 'ADD';	
+}
+print_OUT("Will analyse SNPs association restuls of type [ $test_name].")
 # define option to read genotype probability files
 my $geno_probs = undef;
 my $geno_probs_format = undef;
@@ -269,7 +273,7 @@ while (  my $a = <ASSOC> ) {
    exists $header{"P"} or print_OUT("Not p-value columns available, these are the headers i found [ " . (keys %header) . " ]",$LOG) and exit(1);
    # if there is a cols specifying the association test done. Only use result from ADD tests, this is only for compatibility with PLINK 
   if ( exists $header{"TEST"}){
-      next if ( $data[$header{"TEST"}] ne "ADD");
+      next if ( $data[$header{"TEST"}] ne $test_name);
    }
   #if (defined $v ) { print $data[$header{"SNP"}]," ", $data[$header{"P"}],"\n"; }
 	  # if there is an affy id convert it to rsid.
@@ -1551,6 +1555,7 @@ script [options]
 	-ox_gprobs      Genotype probabilities in OXFORD format.
 	-bgl_gprobs		Genotype probabilities in BEAGLE format.
 	-assoc, -a		SNP association file, columns header is necessary and at leat columns with SNP and P names must be present
+	-test_name		Defined association result to be used. Default: 'ADD'
 	-snpmap, -m		Snp-to-gene mapping file
 	-affy_to_rsid		Affy id to rs id mapping file
 	-gmt			Gene-set definition file
@@ -1636,7 +1641,11 @@ Genotype probabilities in BEAGLE format. Please see http://faculty.washington.ed
 =item B<-assoc, -a>
  
 SNP association file, columns header is necessary and at leat columns with SNP and P names must be present. 
- 
+
+=item B<-test_name>
+
+Select the type of association test to be used. default 'ADD'
+
 =item B<-snpmap, -m>
 
 SNP-to-gene mapping file. Format is tab separated with fields:chromosome,start,end,Ensembl id, hugo id, description, SNP1, SNP2, ..., SNPN. 

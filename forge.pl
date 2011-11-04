@@ -23,7 +23,7 @@ use CovMatrix;
 our ( $help, $man, $out, $snpmap, $bfile, $assoc, $gene_list,
     @genes, $all_genes, $analysis_chr, $report, $spearman,
     $affy_to_rsid, @weights_file, $w_header, $v, $lambda,
-    $print_cor, $pearson_genotypes,$distance, $sample_score,
+    $print_cor, $pearson_genotypes,$distance,$distance_three_prime,$distance_five_prime, $sample_score,
     $ped, $map, $ox_gprobs,$sample_score_self, $w_maf,
     $ss_mean, $gc_correction,$g_prob_threshold,
 	$bgl_gprobs, $flush, $include_gene_type, $exclude_gene_type, $gmt,
@@ -123,8 +123,18 @@ defined $gmt_max_size or $gmt_max_size = 999_999_999;
 defined $flush or $flush = 1000;
 
 # define distance threshold,
-defined $distance or $distance = 20;
-print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
+
+if (defined $distance) {
+	$distance_three_prime = $distance;
+	$distance_five_prime = $distance;
+} elsif (not defined $distance) {
+	$distance = 20;
+	$distance_three_prime = $distance;
+	$distance_five_prime = $distance;
+	print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
+} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
+	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
+}
 
 # $report is use to specify how often report the advance when reading input files
 defined $report or $report = 50_000;
@@ -459,9 +469,18 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 	  foreach my $s (@m) {
 		my ($id,$pos,$allele,$strand) = split(/\:/,$s);
 		next if (not defined $id);
-		if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-		elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
-	  }
+		if (( $pos >= $start) and ($pos <= $end)){ 
+			push @mapped_snps, $id; 
+		} else {
+			# $distance_three_prime $distance_five_prime
+			if ($strand < 0){ 
+				# gene is on reverse strand: <-----    start <- end, 3' <- 5'
+				if ( ( abs ($pos - $start) <= $distance_three_prime*1_000 ) or ( abs ($pos - $end) <= $distance_five_prime*1_000 )) { push @mapped_snps, $id; }	
+			} elsif ($stratd > 0) {
+				# gene is on reverse strand: ----->    start -> end, 5' -> 3'
+				if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
+			}
+		}
 	   
 	   next if (scalar @mapped_snps == 0);
 	   # create a pseudo-hash with the gene info
@@ -1574,6 +1593,8 @@ script [options]
 	-gene_type, -type	Only analyses genes of this type, e.g. protein_coding
 	-exclude_gene_type, -exclude_type	Exclude genes of this type from the analysis, e.g. pseudogenes
 	-distance, -d		Max SNP-to-gene distance allowed (in kb)
+	-distance_three_prime	Distance to 3-prime of the gene (in kb)
+	-distance_five_prime	Distance to 5-prime of the gene (in kb)
 	-correlation, -cor	SNP-SNP correlation file
 	-pearson_genotypes	Calculate SNP-SNP correlation with a pearson correlation for categorical variables
 	-use_ld				Use Linkage Disequilibrium as measure of SNP-SNP correlation
@@ -1705,7 +1726,15 @@ Exclude genes of this type from the analysis, e.g. pseudogenes
 =item B<-distance, -d>
  
 Max SNP-to-gene distance allowed (in kb) 
- 
+
+=item B<-distance_three_prime>
+
+Distance to 3-prime of the gene (in kb)
+
+=item B<-distance_five_prime>
+
+Distance to 5-prime of the gene (in kb)
+
 =item B<-correlation, -cor>
 
 SNP-SNP correlation file. Space separated file with 3 columns, first 2 the SNP ids the the 3th the correlation between them. Like:

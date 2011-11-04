@@ -54,7 +54,9 @@ GetOptions(
 	'print_cor' => \$print_cor,
 	'pearson_genotypes' => \$pearson_genotypes,
 	'use_ld' => \$use_ld_as_corr,
-	'distance|d=i' => \$distance, 
+	'distance|d=i' => \$distance,
+	'distance_three_prime=i' => $distance_three_prime,
+	'distance_five_prime=i' => $distance_five_prime,
 	'sample_score' => \$sample_score,
 	'weights|w=s' => \@weights_file,
 	'w_header' => \$w_header,
@@ -481,7 +483,7 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 				if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
 			}
 		}
-	   
+	  }
 	   next if (scalar @mapped_snps == 0);
 	   # create a pseudo-hash with the gene info
 	   $gene{$ensembl} = {

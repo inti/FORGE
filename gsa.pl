@@ -58,8 +58,8 @@ GetOptions(
 	'bfile=s'	=> \$bfile,
 	'snpmap|m=s@' => \$snpmap,
 	'distance|d=i' => \$distance,
-	'distance_three_prime=i' => $distance_three_prime,
-	'distance_five_prime=i' => $distance_five_prime,
+	'distance_three_prime=i' => \$distance_three_prime,
+	'distance_five_prime=i' => \$distance_five_prime,
 	'affy_to_rsid=s' => \$affy_to_rsid,
 	'quick_gene_cor' => \$quick_gene_cor,
 	'gene_cor_max_dist=i' => \$gene_cor_max_dist,
@@ -98,15 +98,14 @@ if (defined $input_z and not defined $perm){ $perm = 10_000; }
 if (defined $distance) {
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
-} elsif (not defined $distance) {
+} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
+	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
+} else {
 	$distance = 20;
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
 	print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
-} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
-	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
 }
-
 defined $report or $report = 250;
 defined $max_size or $max_size = 99_999_999; 
 defined $min_size or $min_size = 10;
@@ -470,7 +469,7 @@ if (defined $snpmap){
 					if ($strand < 0){ 
 						# gene is on reverse strand: <-----    start <- end, 3' <- 5'
 						if ( ( abs ($pos - $start) <= $distance_three_prime*1_000 ) or ( abs ($pos - $end) <= $distance_five_prime*1_000 )) { push @mapped_snps, $id; }	
-					} elsif ($stratd > 0) {
+					} elsif ($strand > 0) {
 						# gene is on reverse strand: ----->    start -> end, 5' -> 3'
 						if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
 					}

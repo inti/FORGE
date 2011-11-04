@@ -55,8 +55,8 @@ GetOptions(
 	'pearson_genotypes' => \$pearson_genotypes,
 	'use_ld' => \$use_ld_as_corr,
 	'distance|d=i' => \$distance,
-	'distance_three_prime=i' => $distance_three_prime,
-	'distance_five_prime=i' => $distance_five_prime,
+	'distance_three_prime=i' => \$distance_three_prime,
+	'distance_five_prime=i' => \$distance_five_prime,
 	'sample_score' => \$sample_score,
 	'weights|w=s' => \@weights_file,
 	'w_header' => \$w_header,
@@ -129,13 +129,13 @@ defined $flush or $flush = 1000;
 if (defined $distance) {
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
-} elsif (not defined $distance) {
+} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
+	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
+} else {
 	$distance = 20;
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
 	print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
-} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
-	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
 }
 
 # $report is use to specify how often report the advance when reading input files
@@ -156,7 +156,7 @@ if (not defined $test_name){
 	$test_name = 'ADD';	
 }
 $test_name = uc($test_name);
-print_OUT("Will analyse SNPs association restuls of type [ $test_name].")
+print_OUT("Will analyse SNPs association restuls of type [ $test_name].",$LOG);
 # define option to read genotype probability files
 my $geno_probs = undef;
 my $geno_probs_format = undef;
@@ -478,7 +478,7 @@ foreach my $snp_gene_mapping_file (@$snpmap){
 			if ($strand < 0){ 
 				# gene is on reverse strand: <-----    start <- end, 3' <- 5'
 				if ( ( abs ($pos - $start) <= $distance_three_prime*1_000 ) or ( abs ($pos - $end) <= $distance_five_prime*1_000 )) { push @mapped_snps, $id; }	
-			} elsif ($stratd > 0) {
+			} elsif ($strand > 0) {
 				# gene is on reverse strand: ----->    start -> end, 5' -> 3'
 				if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
 			}

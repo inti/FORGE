@@ -98,6 +98,7 @@ if (defined $input_z and not defined $perm){ $perm = 10_000; }
 if (defined $distance) {
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
+    print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
 } elsif ( (defined $distance_three_prime) and (defined $distance_five_prime)){
 	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
 } else {
@@ -123,6 +124,12 @@ if (defined $mnd){
 	} else { $gene_p_type = 'z_fix'; }
 	print_OUT("Will use multivariate normal distribution sampling to estimate gene-gene correlations. Using [ $mnd_N ] simulations with the [ $gene_p_type] gene p-value");
 }	
+
+if ((defined $snp_assoc or defined $bfile) and not defined $snpmap){
+    print_OUT("For GWAS pathway analysis you need to define: genotype file with -bfile option, SNP list of SNPs used to calculate gene p-values with -snp_assoc option and a snp-2-gene mapping file with the -m option.",$LOG);
+    print_OUT("Exiting now, try again");
+    exit(1);
+}
 
 if (defined $binomial){
     if (not defined $ref_list){ $all_are_background = 1; }
@@ -268,6 +275,7 @@ if (scalar @pathways == 1){
 		}
 	}
 }
+
 @pathways = values %PATHS;
 print_OUT("   '-> [ " . scalar @pathways . " ] gene-sets will be analysed",$LOG);
 
@@ -379,12 +387,13 @@ if (defined $snp_assoc){
 		open (ASSOC,$file) or print_OUT("Cannot open [ $file ]") and die $!;
 		while(my $line = <ASSOC>){
 			my @d = split(/[\t+\s+]/,$line);
-			$snps_covered{$d[0]} = "";
+			$snps_covered{$d[0]} = $d[0];
 		}
 		close(ASSOC);
 	}
 	print_OUT("   '->[ " . scalar (keys %snps_covered) . " ] SNP read",$LOG);
 }
+
 my $N_bytes_to_encode_snp;
 my %bim_ids = ();
 my @bim = ();
@@ -448,12 +457,10 @@ if (defined $snpmap){
 				$gene_id= lc($hugo);
 			} elsif (exists $gene_data{lc($ensembl)}){
 				$gene_id= lc($ensembl);
-			} else {
-				next;
-			}		
+			} else { next; }		
 			# exlude genes that are not in gene-sets
 			next unless (exists $genes_in_paths{lc($hugo)} or exists $genes_in_paths{lc($ensembl)});
-
+            print "This is here [ $hugo ]\n";
 			my @first_snp_n_fields =  split(/\:/,$m[0]);
 			if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 			
@@ -655,7 +662,6 @@ if (scalar (keys %gene_data) == 0){
 	print_OUT("No gene-sets to analyze\n");
 	exit(1);
 }
-
 
 # if permutation are performed store null distribution in here
 my %null_size_dist = ();

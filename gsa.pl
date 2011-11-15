@@ -1331,7 +1331,7 @@ script [options]
 	
      Multivariate Normal Distribution sampling
      -mnd			Estimate significance by sampling from a multivatiate normal distribution
-     -mnd_N         Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
+     -mnd_n         Number of MND simulations to calculate gene p-value (default=1000000)
      -mnd_gene_corr Calculate the correlation between gene-statistics from by simulattions 
 
 	Output modifiers:
@@ -1431,9 +1431,9 @@ Determine the lamda for the genomic control correction from the input p-values
 
 Estimate significance by sampling from a multivatiate normal distribution
 
-=item B<-mnd_N>
+=item B<-mnd_n>
  
-Maximum times the statistics must be seen to calculate the empirical p-value (default=1000000)
+Maximum number of MND simulations used to calculate the gene p-values (default=1000000)
 
  
 =item B <-mnd_gene_corr>

@@ -98,7 +98,7 @@ if (defined $input_z and not defined $perm){ $perm = 10_000; }
 if (defined $distance) {
 	$distance_three_prime = $distance;
 	$distance_five_prime = $distance;
-} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
+} elsif ( (defined $distance_three_prime) and (defined $distance_five_prime)){
 	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
 } else {
 	$distance = 20;

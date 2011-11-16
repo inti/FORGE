@@ -460,7 +460,6 @@ if (defined $snpmap){
 			} else { next; }		
 			# exlude genes that are not in gene-sets
 			next unless (exists $genes_in_paths{lc($hugo)} or exists $genes_in_paths{lc($ensembl)});
-            print "This is here [ $hugo ]\n";
 			my @first_snp_n_fields =  split(/\:/,$m[0]);
 			if (4 !=  scalar @first_snp_n_fields){ $description .= splice(@m,0,1); }
 			

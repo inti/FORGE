@@ -450,7 +450,7 @@ if (defined $snpmap){
 		while (my $read = $MAP->getline()) {
 			chomp($read);
 			# the line is separate in gene info and snps. the section are separated by a tab.
-			my ($chr,$start,$end,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
+			my ($chr,$start,$end,$gene_strand,$ensembl,$hugo,$gene_status,$gene_type,$description,@m) = split(/\t+/,$read);
 			#check if gene was in the list of genes i want to analyze
 			my $gene_id = undef;
 			if ( exists $gene_data{lc($hugo)}){
@@ -465,29 +465,23 @@ if (defined $snpmap){
 			
 			# get all mapped snps within the distance threshold,
 			my @mapped_snps = ();
+#   SECTION COMMENTED UNTIL I RESOLVE ISSUES WITH ASYMMETRICAL MAPPING OF SNPS TO GENES         
 			foreach my $s (@m) {
 				my ($id,$pos,$allele,$strand) = split(/\:/,$s);
 				next if (not defined $id);
-				if (( $pos >= $start) and ($pos <= $end)){ push @mapped_snps, $id; }
-				elsif ( ( abs ($pos - $start) <= $distance*1_000 ) or ( abs ($pos - $end) <= $distance*1_000 )) { push @mapped_snps, $id; }
+				if (( $pos >= $start) and ($pos <= $end)){ 
+					push @mapped_snps, $id; 
+				} else {
+					# $distance_three_prime $distance_five_prime
+					if ($gene_strand < 0){ 
+						# gene is on reverse strand: <-----    start <- end, 3' <- 5'
+						if ( ( abs ($pos - $start) <= $distance_three_prime*1_000 ) or ( abs ($pos - $end) <= $distance_five_prime*1_000 )) { push @mapped_snps, $id; }	
+					} elsif ($gene_strand > 0) {
+						# gene is on reverse strand: ----->    start -> end, 5' -> 3'
+						if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
+					}
+				}
 			}
-#   SECTION COMMENTED UNTIL I RESOLVE ISSUES WITH ASYMMETRICAL MAPPING OF SNPS TO GENES         
-#			foreach my $s (@m) {
-#				my ($id,$pos,$allele,$strand) = split(/\:/,$s);
-#				next if (not defined $id);
-#				if (( $pos >= $start) and ($pos <= $end)){ 
-#					push @mapped_snps, $id; 
-#				} else {
-#					# $distance_three_prime $distance_five_prime
-#					if ($strand < 0){ 
-#						# gene is on reverse strand: <-----    start <- end, 3' <- 5'
-#						if ( ( abs ($pos - $start) <= $distance_three_prime*1_000 ) or ( abs ($pos - $end) <= $distance_five_prime*1_000 )) { push @mapped_snps, $id; }	
-#					} elsif ($strand > 0) {
-#						# gene is on reverse strand: ----->    start -> end, 5' -> 3'
-#						if ( ( abs ($pos - $start) <= $distance_five_prime*1_000 ) or ( abs ($pos - $end) <= $distance_three_prime*1_000 )) { push @mapped_snps, $id; }
-#					}
-#				}
-#			}
 			
 			next if (scalar @mapped_snps == 0);
 			

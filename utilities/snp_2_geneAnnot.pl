@@ -3,27 +3,39 @@ use strict;
 use Bio::EnsEMBL::Registry;
 use Data::Dumper;
 use Getopt::Long;
+use IO::File;
 
-our ( $Usage, $help, $out, $chr, $shift);
+our ( $Usage, $help, $out, $chr, $shift,$distance,$distance_five_prime,$distance_three_prime);
 
 GetOptions(
-   'help|h'    => \$help,
+   'help|h'   => \$help,
    'out|o=s'   => \$out, #name of the output file
    'chr=i@'  => \$chr,
+   'distance|d=i' => \$distance,
+   'distance_five_prime|five=i' => \$distance_five_prime,
+   'distance_three_prime|three=i' => \$distance_three_prime,
    'window_size|w=i' => \$shift,
-);
+) or pod2usage(0);
 
-my $VERSION = "0.1";
-print "SNP-to-gene annotation script version [ $VERSION ]\n";
-defined $chr or @{ $chr } = (1..22,'X','Y','MT');
-defined $out or die("please give the name of the output file (you forgot option -o !!!!)\n");
+pod2usage(0) if (defined $help);
+pod2usage(-exitstatus => 2, -verbose => 2) if (defined $help);
+
+
 open (OUT,">$out") or die $!;
+my $LOG = new IO::File; 
+$LOG->open(">$out.log") or print_OUT("I can not open [ $out.log ] to write to",$LOG) and exit(1);
 
+print_OUT("Opened output and log file [ $out ] and [ $out.log ]",$LOG);
+
+defined $chr or @{ $chr } = (1..22,'X','Y','MT');
+print_OUT("Will analyze chromosomes [ @$chr ]");
 # start and get registry
+print_OUT("Contacting Ensembl DB",$LOG);
 my $reg = "Bio::EnsEMBL::Registry";
 $reg->load_registry_from_db( -host => 'ensembldb.ensembl.org', -user => 'anonymous', -verbose => '0', );
 
 #start Core adaptors
+print_OUT("Generating Data adaptors",$LOG);
 my $genes = $reg->get_adaptor("human","core","gene");
 my $sliceAdap = $reg->get_adaptor("human","core","slice");
 
@@ -33,15 +45,29 @@ my $varAdap = $dbVar->get_VariationAdaptor();
 my $varFeatAdap = $dbVar->get_VariationFeatureAdaptor();
 
 # start population adaptor
+print_OUT("LD information will be taken from the [ CSHL-HAPMAP:HapMap-CEU ] population",$LOG);
 my $pop_name = 'CSHL-HAPMAP:HapMap-CEU'; #we only want LD in this population
 my $pop_adaptor = $dbVar->get_PopulationAdaptor; #get adaptor for Population object
 my $pop = $pop_adaptor->fetch_by_name($pop_name); #get population object from database
 my $ldFeatContAdap = $dbVar->get_LDFeatureContainerAdaptor; #get adaptor for LDFeatureContainer object
 
+print_OUT("Fetching Information from Ensembl database version " . $reg->software_version() . "",$LOG);
 
+if (defined $distance) {
+	$distance_three_prime = $distance;
+	$distance_five_prime = $distance;
+    print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
+} elsif ( (defined $distance_three_prime) or (defined $distance_five_prime)){
+    defined $distance_three_prime or $distance_three_prime = 50;
+    defined $distance_five_prime or $distance_five_prime = 50;
+	print_OUT("Max SNP-to-gene distance allowed for 3-prime [ $distance_three_prime ] and 5-prime [ $distance_five_prime ] kb",$LOG);
+} else {
+	$distance = 50;
+	$distance_three_prime = $distance;
+	$distance_five_prime = $distance;
+	print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
+}
 
-
-warn "Fetching Information from Ensembl Version ", $reg->software_version(),"\n";
 
 my @annot;
 my $size = undef;
@@ -51,63 +77,74 @@ foreach my $c (@{ $chr }) {
    elsif ($c == 24){ $c = 'Y'}
    elsif ($c == 26){ $c = 'MT'}
    elsif ($c == 25){ die("I do know chromosome 25!! I know form 1 to 22 and X (23), Y (24) and MT (26)\nPlease choose one or find another programe :)\n");}
-   my $gene_slice = $sliceAdap->fetch_by_region('chromosome',$c);   
-   print"Fetching genes for chromosome $c\n";
-   my @genes = @ { $genes->fetch_all_by_Slice($gene_slice) };
-   print "\t", scalar @genes,"\n";
+   my $chr_slice = $sliceAdap->fetch_by_region('chromosome',$c);   
+
+   print_OUT("Fetching genes for chromosome $c",$LOG);
+    
+   my @genes = @ { $genes->fetch_all_by_Slice($chr_slice) };
+   print_OUT("   '-> [" . scalar @genes . " ] genes",$LOG);
    !defined $size and $size = 999999999999;
-   for (my $pos = 0; $pos <= $size + $shift; $pos += $shift){
-      
-      my $slice = $sliceAdap->fetch_by_region('chromosome',$c,$pos,$pos + $shift);
-      if (!defined $size) {
-         print "Defining chr$c size to ", $slice->seq_region_length(),"\n"; 
-         $size = $slice->seq_region_length();
-      }
-      print "Fetching variations for chromosome $c from ",$pos," ",$pos + $shift,"\n";
-      my $ldFeatCont = $ldFeatContAdap->fetch_by_Slice($slice,$pop,$pos + $shift);
-      my @vars;
-      map { push @vars, @ { $varFeatAdap->fetch_all_by_Variation($_) } } @{ $ldFeatCont->get_variations() } ;
-      print "\t", scalar @vars,"\n";
-      next if (scalar @vars == 0);
-      my $var_index = 0;
-      my $anchor = 0;
-      foreach my $v (@vars){
-         next unless ($v->var_class() eq 'snp');
-         $v = feat_2_chrCoord($v);
-         my $state = coord_system($v);
-         next if ($state eq 'undef');
-         #print $v->display_id," ", $v->seq_region_name," ",$v->seq_region_start," ",$v->seq_region_end," ",$v->var_class(),"\n";
-         unless ($var_index == 0) {
-            my $distance_vars = dist_2_objects($vars[$anchor],$v);
-            if ($distance_vars == 0) {
-               $annot[$var_index + 1] = $annot[$var_index];
-               $var_index++;
-               next;
-            } elsif (abs($distance_vars) > 2e6) { last; }
-         }
-         
-         for (my $i = 0; $i < scalar @genes;$i++){
-            my $distance = dist_2_objects($genes[$i],$v);
-            if (abs($distance) <= 1e3) {
-               push @{ $annot[$var_index] } , {'variation'=>$v, 'gene'=> $genes[$i], 'distance'=>$distance, 'index' => $i};
-            }
-         }
-         $var_index++;
-         $anchor = $var_index;
-      }
-      foreach my $index (@annot) {
-         map {
-            print OUT $_->{'variation'}->display_id," ", $_->{'variation'}->seq_region_name," ",$_->{'variation'}->var_class()," ",$_->{'variation'}->seq_region_start," ";
-            print OUT $_->{'distance'}," ",$_->{'gene'}->stable_id,":",$_->{'gene'}->external_name(),":",$_->{'gene'}->biotype,"\n";
-         } @$index;
-      }
-      @annot = ();
-   }
+    my $gene_counter = 0; 
+    my $total_genes = scalar @genes;
+    while (my $g = shift @genes){
+        my $right_distance = 0;
+        my $left_distance = 0;
+        if ($g->strand() < 0){ 
+                # gene is on reverse strand: <-----    start <- end, 3' <- 5'
+                $right_distance = $distance_five_prime;
+                $left_distance = $distance_three_prime;
+        } elsif ($g->strand() > 0){
+                # gene is on reverse strand: ----->    start -> end, 5' -> 3'
+                $right_distance = $distance_three_prime;
+                $left_distance = $distance_five_prime;
+        }
+        my $gene_slice_extended = $sliceAdap->fetch_by_region('chromosome',$c, $g->start - $left_distance,$g->end + $right_distance);
+        my $vfs = $varFeatAdap->fetch_all_by_Slice($gene_slice_extended); 
+        
+        print OUT join "\t", (  $g->seq_region_name, # chromosome
+                            $g->start, # start
+                            $g->end, # end
+                            $g->strand, # strand
+                            $g->display_id, # ensembl id 
+                            $g->external_name(), # hugo name 
+                            $g->status, #status  
+                            $g->biotype(),# biotype 
+        #$g->description() # description
+                          );
+        foreach my $vf (@{$vfs}){
+            print OUT "\t",$vf->variation_name,":",$vf->start,":",$vf->allele_string,":",$vf->strand; 
+        }
+        print OUT "\n";
+        print scalar localtime," \t", progress_bar(++$gene_counter,$total_genes);
+    }
+    print "\n";
 }
 
+print_OUT("Finished",$LOG);
 
 exit;
 
+# wget-style. routine by tachyon
+# at http://tachyon.perlmonk.org/
+sub progress_bar {
+    my ( $got, $total, $width, $char ) = @_;
+    $width ||= 25; $char ||= '=';
+    my $num_width = length $total;
+    sprintf "|%-${width}s| Done with [ %${num_width}s ] genes of [ %s (%.2f%%) ]\r", 
+    $char x (($width-1)*$got/$total). '>', 
+    $got, $total, 100*$got/+$total;
+}
+
+sub print_OUT {
+	my $string = shift;
+	my @file_handles = @_; 	
+	print scalar localtime(), "\t$string\n";
+	unless (scalar @file_handles == 0){
+		foreach my $fh (@file_handles){
+			print $fh scalar localtime(), "\t$string\n";
+		}
+	}
+}
 
 sub coord_system {
    my $feat = shift;
@@ -130,3 +167,72 @@ sub dist_2_objects {
       return( int(($snp->seq_region_start - $gn->seq_region_start)/1e3) );
    } else { return(0); } 
 }
+
+__END__
+
+=head1 NAME
+ 
+ Perl implementation of PAGE: parametric analysis of gene set enrichment. As bonus includes strategies to correct for gene clusters.
+ 
+=head1 DESCRIPTION
+ 
+B<This program> will read a file with gene symbols and statistics and performed the PAGE gene-set analysis. It reads a at least two files: a file with gene id's and p-values and a second file with the gene-set definitions. Please check the original paper Kim SY, Volsky DJ: PAGE: parametric analysis of gene set enrichment. BMC Bioinformatics 2005, 6:144. for details of the method. In addition it implements correction for Linkage Disequilibrium which is useful when analysing results from genome-wide association studies. Please check http://github.com/inti/ for updates and documentation.  
+ 
+=head1 SYNOPSIS
+ 
+ script [options]
+ 
+ General options
+ -h, --help		print help message
+ -m, --man		print complete documentation
+ -report			how often to report advance
+ -gmt			gene-set definitions on GMT format
+ -file			gene p-value file
+ -out, -o		output file
+ -max_size		max gene-set size
+ -min_size		min gene-set size
+ -ref_list		set reference list for the analysis
+ 
+ Analysis modifiers
+ -distance		Distance to 5-prime of the gene (in kb)
+ -distance_three_prime	Distance to 3-prime of the gene (in kb)
+ -distance_five_prime	Distance to 5-prime of the gene (in kb)
+ -set_stat		statistics to calculate over the sub-networks
+ -gc_correction		Determine the lamda for the genomic control correction from the input p-values
+ -z_score		input values are z_scores (the absolute values will be used)
+ -gs_coverage		number [0,1]. Fraction of the gene-set that must be covered by the
+ experiment for the gene set to be considered in the analysis
+ 
+ Multivariate Normal Distribution sampling
+ -mnd			Estimate significance by sampling from a multivatiate normal distribution
+ -mnd_n         Number of MND simulations to calculate gene p-value (default=1000000)
+ -mnd_gene_corr Calculate the correlation between gene-statistics from by simulattions 
+ 
+ Output modifiers:
+ -append			Append results to output file rather than overwrite it
+ -add_file_name		add the input file name to the result
+ 
+ Permutations:
+ -perm			number of permutations
+ 
+=head1 OPTIONS
+ 
+=over 8
+ 
+=item B<-help>
+ 
+ Print help message
+ 
+=item B<-man>
+ 
+ print complete documentation
+ 
+=item B<-report>
+ 
+ how often to report advance. Provide an integer X and the program will report adnvance after X networks are analyzed.
+  
+=back
+ 
+ 
+ 
+=cut

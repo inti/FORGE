@@ -5,7 +5,7 @@ use Data::Dumper;
 use Getopt::Long;
 use IO::File;
 
-our ( $Usage, $help, $out, $chr, $shift,$distance,$distance_five_prime,$distance_three_prime);
+our ( $Usage, $help, $out, $chr, $gene_list,$distance,$distance_five_prime,$distance_three_prime);
 
 GetOptions(
    'help|h'   => \$help,
@@ -14,7 +14,7 @@ GetOptions(
    'distance|d=i' => \$distance,
    'distance_five_prime|five=i' => \$distance_five_prime,
    'distance_three_prime|three=i' => \$distance_three_prime,
-   'window_size|w=i' => \$shift,
+   'gene_list=s' => \$gene_list,
 ) or pod2usage(0);
 
 pod2usage(0) if (defined $help);
@@ -44,13 +44,6 @@ my $dbVar = $reg->get_DBAdaptor("human","variation");
 my $varAdap = $dbVar->get_VariationAdaptor();
 my $varFeatAdap = $dbVar->get_VariationFeatureAdaptor();
 
-# start population adaptor
-print_OUT("LD information will be taken from the [ CSHL-HAPMAP:HapMap-CEU ] population",$LOG);
-my $pop_name = 'CSHL-HAPMAP:HapMap-CEU'; #we only want LD in this population
-my $pop_adaptor = $dbVar->get_PopulationAdaptor; #get adaptor for Population object
-my $pop = $pop_adaptor->fetch_by_name($pop_name); #get population object from database
-my $ldFeatContAdap = $dbVar->get_LDFeatureContainerAdaptor; #get adaptor for LDFeatureContainer object
-
 print_OUT("Fetching Information from Ensembl database version " . $reg->software_version() . "",$LOG);
 
 if (defined $distance) {
@@ -68,6 +61,13 @@ if (defined $distance) {
 	print_OUT("Max SNP-to-gene distance allowed [ $distance ] kb",$LOG);
 }
 
+my %selected_genes = ();
+if (defined $gene_list){
+    open(GL,$gene_list)or die print_OUT("Cannot open [ $gene_list ]");
+    my @tmp = <GL>;
+    chomp(@tmp);
+    map { $selected_genes{$_} = $_; } @tmp;
+}
 
 my @annot;
 my $size = undef;
@@ -83,10 +83,14 @@ foreach my $c (@{ $chr }) {
     
    my @genes = @ { $genes->fetch_all_by_Slice($chr_slice) };
    print_OUT("   '-> [" . scalar @genes . " ] genes",$LOG);
-   !defined $size and $size = 999999999999;
     my $gene_counter = 0; 
     my $total_genes = scalar @genes;
+    if (defined $gene_list){ $total_genes = scalar keys %selected_genes; }
     while (my $g = shift @genes){
+        if (defined $gene_list){ 
+            next if ((not defined $selected_genes{$g->display_id}) and ( not defined $selected_genes{$g->external_name()}));
+            delete $selected_genes{$g->display_id};
+        }
         my $right_distance = 0;
         my $left_distance = 0;
         if ($g->strand() < 0){ 
@@ -100,7 +104,7 @@ foreach my $c (@{ $chr }) {
         }
         my $gene_slice_extended = $sliceAdap->fetch_by_region('chromosome',$c, $g->start - $left_distance,$g->end + $right_distance);
         my $vfs = $varFeatAdap->fetch_all_by_Slice($gene_slice_extended); 
-        
+        next if (scalar @{$vfs} == 0);
         print OUT join "\t", (  $g->seq_region_name, # chromosome
                             $g->start, # start
                             $g->end, # end
@@ -112,10 +116,17 @@ foreach my $c (@{ $chr }) {
         #$g->description() # description
                           );
         foreach my $vf (@{$vfs}){
-            print OUT "\t",$vf->variation_name,":",$vf->start,":",$vf->allele_string,":",$vf->strand; 
+            print  OUT "\t",$vf->variation_name,":",$vf->start + $g->start - $left_distance - 1,":",$vf->allele_string,":",$vf->strand; 
         }
         print OUT "\n";
         print scalar localtime," \t", progress_bar(++$gene_counter,$total_genes);
+        if (defined $gene_list){ 
+            if (scalar keys %selected_genes == 0) { 
+                print "\n";
+                print_OUT("Finished",$LOG);
+                exit;
+            }
+        }
     }
     print "\n";
 }

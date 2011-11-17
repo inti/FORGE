@@ -3,6 +3,7 @@ use strict;
 use Bio::EnsEMBL::Registry;
 use Data::Dumper;
 use Getopt::Long;
+use Pod::Usage;
 use IO::File;
 use GWAS_IO;
 
@@ -183,40 +184,16 @@ B<This program> will read a file with gene symbols and statistics and performed 
  
 =head1 SYNOPSIS
  
- script [options]
+    script [options]
  
- General options
- -h, --help		print help message
- -m, --man		print complete documentation
- -report			how often to report advance
- -gmt			gene-set definitions on GMT format
- -file			gene p-value file
- -out, -o		output file
- -max_size		max gene-set size
- -min_size		min gene-set size
- -ref_list		set reference list for the analysis
- 
- Analysis modifiers
- -distance		Distance to 5-prime of the gene (in kb)
- -distance_three_prime	Distance to 3-prime of the gene (in kb)
- -distance_five_prime	Distance to 5-prime of the gene (in kb)
- -set_stat		statistics to calculate over the sub-networks
- -gc_correction		Determine the lamda for the genomic control correction from the input p-values
- -z_score		input values are z_scores (the absolute values will be used)
- -gs_coverage		number [0,1]. Fraction of the gene-set that must be covered by the
- experiment for the gene set to be considered in the analysis
- 
- Multivariate Normal Distribution sampling
- -mnd			Estimate significance by sampling from a multivatiate normal distribution
- -mnd_n         Number of MND simulations to calculate gene p-value (default=1000000)
- -mnd_gene_corr Calculate the correlation between gene-statistics from by simulattions 
- 
- Output modifiers:
- -append			Append results to output file rather than overwrite it
- -add_file_name		add the input file name to the result
- 
- Permutations:
- -perm			number of permutations
+    General options
+    -h, --help          print help message
+    -out,-o             Output file
+    -chr                Chromosome number, multiple instances can be given
+    -distance,-d        Max SNP to gene distance in kb
+    -distance_five_prime,-five      As above but limit for 5-prime of genes
+    -distance_three_prime,-three    As above but limit for 3-prime of genes
+    -gene_list          Gene list to restrict the output
  
 =head1 OPTIONS
  
@@ -226,13 +203,29 @@ B<This program> will read a file with gene symbols and statistics and performed 
  
  Print help message
  
-=item B<-man>
+=item B<-out,-o>
  
- print complete documentation
+ Output file
+
+=item B<-chr>
  
-=item B<-report>
+ Chromosome number, multiple instances can be given
  
- how often to report advance. Provide an integer X and the program will report adnvance after X networks are analyzed.
+=item B<-distance,-d>
+ 
+ Max SNP to gene distance in kb
+ 
+=item B<-distance_five_prime,-five>
+ 
+ As above but limit for 5-prime of genes
+ 
+=item B<-distance_three_prime,-three>
+ 
+ As above but limit for 3-prime of genes
+ 
+=item B<-gene_list>
+ 
+ Gene list to restrict the output. It will use either Ensembl ids or the whatever is annotated under the external_name field on the ensembl db.
   
 =back
  

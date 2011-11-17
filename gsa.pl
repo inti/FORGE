@@ -11,9 +11,9 @@ use PDL::Ufunc;
 use PDL::LinearAlgebra qw(mchol);
 use Data::Dumper;
 use IO::File;
-use Carp qw( confess );
-$SIG{__DIE__} =  \&confess;
-$SIG{__WARN__} = \&confess;
+#use Carp qw( confess );
+#$SIG{__DIE__} =  \&confess;
+#$SIG{__WARN__} = \&confess;
 
 # Load local functions
 use GWAS_IO;
@@ -465,7 +465,6 @@ if (defined $snpmap){
 			
 			# get all mapped snps within the distance threshold,
 			my @mapped_snps = ();
-#   SECTION COMMENTED UNTIL I RESOLVE ISSUES WITH ASYMMETRICAL MAPPING OF SNPS TO GENES         
 			foreach my $s (@m) {
 				my ($id,$pos,$allele,$strand) = split(/\:/,$s);
 				next if (not defined $id);

@@ -26,10 +26,20 @@ if ($@) {
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-@EXPORT = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
-@EXPORT_OK = qw( read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
+@EXPORT = qw( progress_bar read_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped );				# symbols to export by default
+@EXPORT_OK = qw( rprogress_bar ead_gmt extract_stats_from_mperm_dump_all_files build_index line_with_index extract_binary_genotypes extract_genotypes_for_snp_list get_snp_list_from_bgl_format get_snp_list_from_ox_format read_bim read_fam read_map_and_ped);			# symbols to export on request
 
 
+# wget-style. routine by tachyon
+# at http://tachyon.perlmonk.org/
+sub progress_bar {
+    my ( $got, $total, $width, $char ) = @_;
+    $width ||= 25; $char ||= '=';
+    my $num_width = length $total;
+    sprintf "|%-${width}s| Done with [ %${num_width}s ] genes of [ %s (%.2f%%) ]\r", 
+    $char x (($width-1)*$got/$total). '>', 
+    $got, $total, 100*$got/+$total;
+}
 
 sub read_gmt {
     my $file = shift;

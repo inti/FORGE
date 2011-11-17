@@ -4,6 +4,7 @@ use Bio::EnsEMBL::Registry;
 use Data::Dumper;
 use Getopt::Long;
 use IO::File;
+use GWAS_IO;
 
 our ( $Usage, $help, $out, $chr, $gene_list,$distance,$distance_five_prime,$distance_three_prime);
 
@@ -135,16 +136,7 @@ print_OUT("Finished",$LOG);
 
 exit;
 
-# wget-style. routine by tachyon
-# at http://tachyon.perlmonk.org/
-sub progress_bar {
-    my ( $got, $total, $width, $char ) = @_;
-    $width ||= 25; $char ||= '=';
-    my $num_width = length $total;
-    sprintf "|%-${width}s| Done with [ %${num_width}s ] genes of [ %s (%.2f%%) ]\r", 
-    $char x (($width-1)*$got/$total). '>', 
-    $got, $total, 100*$got/+$total;
-}
+
 
 sub print_OUT {
 	my $string = shift;

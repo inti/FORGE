@@ -690,6 +690,7 @@ if (defined $append){
 
 print_OUT("Starting to Analyse the [ " . scalar @pathways . " ] gene-sets",$LOG);
 my $c = 0;
+
 while (my $p = shift @pathways) {
 	report_advance($c,$report,"Gene-Sets");
 	$c++;
@@ -806,7 +807,12 @@ sub simulate_mnd_gene_set {
 	if ($step >  $MAX) { $MAX = $step; }
 	my $se = $gene_set_data->{gene_cor_mat}->getdim(0) * ones $gene_set_data->{gene_cor_mat}->getdim(0);
 	my $SEEN = zeroes 2;
-	
+	my ($cov,$status) = check_positive_definite($gene_set_data->{gene_cor_mat},1e-8);
+	if ($status == 1){
+		print_out("Matrix never positive definite"); # $gene_data->{ensembl}\t$gene_data->{hugo}\t",scalar @{$gene_set_data->{'geno_mat_rows'}},"\n";
+		return(-9);
+	}
+    $gene_set_data->{gene_cor_mat} = $cov;
 	my $cholesky = mchol($gene_set_data->{gene_cor_mat});
 	my $fix_stat = [];
 	my $random_stat = [];
@@ -1061,20 +1067,20 @@ sub calculate_gene_corr_mat {
 					$new_vars{ $gn_j } = $var->{ $gn_j };
 				}
 				
-=head  code replaced for more accurate correlation estimation.              
-				my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
-				for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
-					my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
-					
-					for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
-						
-						my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
-						my $c = corr( $genotype_j, $genotype_i );
-						set $r_i_j, $i_snp, $j_snp, $c->sclr;
-						
-					}
-				}
-=cut                
+#=head  code replaced for more accurate correlation estimation.              
+#				my $r_i_j = zeroes $gene_data->{ $gn_i }->{genotypes}->getdim(1), $gene_data->{ $gn_j }->{genotypes}->getdim(1);
+#				for ( my $i_snp = 0; $i_snp < $gene_data->{ $gn_i }->{genotypes}->getdim(1); $i_snp++ ){
+#					my $genotype_i = $gene_data->{ $gn_i }->{genotypes}->(,$i_snp);
+#					
+#					for ( my $j_snp = 0; $j_snp < $gene_data->{ $gn_j }->{genotypes}->getdim(1); $j_snp++ ){
+#						
+#						my $genotype_j = $gene_data->{ $gn_j }->{genotypes}->(,$j_snp);
+#						my $c = corr( $genotype_j, $genotype_i );
+#						set $r_i_j, $i_snp, $j_snp, $c->sclr;
+#						
+#					}
+#				}
+#=cut                
 				# combine the genotype data information
                 my $G = $gene_data->{ $gn_i }->{genotypes}->glue(1, $gene_data->{ $gn_j }->{genotypes});
                 my $G_corr = cov_shrink($G->transpose);

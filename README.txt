@@ -1,7 +1,5 @@
 FORGE software suit
 
-http://dx.doi.org/10.5281/zenodo.8475
-
 This projects develops software to perform systems biology analyses for genome-wide association studies.
 For the latest version of the source code please visit https://github.com/inti/FORGE
 For documentation and example please visit https://github.com/inti/FORGE/wiki

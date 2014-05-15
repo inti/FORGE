@@ -1,7 +1,7 @@
 FORGE software suit
 
 ### Zenodo DOI can be use for citations
-[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.9821.png)](https://travis-ci.org/boennemann/badges)
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.9821.png)](https://zenodo.org/record/9821)
 
 This projects develops software to perform systems biology analyses for genome-wide association studies.
 For the latest version of the source code please visit https://github.com/inti/FORGE

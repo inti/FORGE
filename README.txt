@@ -1,5 +1,7 @@
 FORGE software suit
 
+### TravisCI
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.9821.png)](https://travis-ci.org/boennemann/badges)
 
 This projects develops software to perform systems biology analyses for genome-wide association studies.
 For the latest version of the source code please visit https://github.com/inti/FORGE

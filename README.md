@@ -1,6 +1,6 @@
 FORGE software suit
 
-### TravisCI
+### Zenodo DOI can be use for citations
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.9821.png)](https://travis-ci.org/boennemann/badges)
 
 This projects develops software to perform systems biology analyses for genome-wide association studies.
